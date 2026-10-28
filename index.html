@@ -1,0 +1,877 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ecco PIM</title>
+<style>
+:root{
+  --bg:#fbfbfa; --panel:#f3f2ef; --text:#1d1d1b; --muted:#85837d; --faint:#b9b6af;
+  --line:#e3e1dc; --accent:#2f6fde; --accent-bg:#e8effc; --hover:#ecebe6;
+  --done:#9a978f; --warn-bg:#fff4d6; --warn:#7a5a00; --session:#5641b8; --session-bg:#f1eefc;
+  --pill:#eceae4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1b1c1e; --panel:#222326; --text:#e6e5e1; --muted:#8f8d88; --faint:#5d5c58;
+    --line:#33343a; --accent:#6b9cff; --accent-bg:#26324a; --hover:#2b2c30;
+    --done:#77756f; --warn-bg:#3a3220; --warn:#e8c56a; --session:#ab9dff; --session-bg:#2a2640;
+    --pill:#2e2f34;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1b1c1e; --panel:#222326; --text:#e6e5e1; --muted:#8f8d88; --faint:#5d5c58;
+  --line:#33343a; --accent:#6b9cff; --accent-bg:#26324a; --hover:#2b2c30;
+  --done:#77756f; --warn-bg:#3a3220; --warn:#e8c56a; --session:#ab9dff; --session-bg:#2a2640;
+  --pill:#2e2f34;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.55 "Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;display:flex;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:1px solid var(--line);border-radius:5px;padding:2px 8px;cursor:pointer}
+button:hover{background:var(--hover)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:2px 6px}
+
+/* Sidebar */
+#side{width:250px;min-width:250px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;height:100%}
+#side .top{padding:12px 12px 6px;display:flex;align-items:center;gap:6px}
+#side .brand{font-weight:700;letter-spacing:.2px;flex:1}
+#side .new{display:flex;gap:6px;padding:0 12px 8px}
+#side .new button{flex:1}
+#filter{margin:0 12px 8px;width:calc(100% - 24px)}
+#lists{flex:1;overflow:auto;padding-bottom:8px}
+.sec{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:10px 14px 3px;font-weight:600}
+.item{display:flex;gap:6px;align-items:baseline;padding:2px 14px;cursor:pointer;white-space:nowrap;overflow:hidden}
+.item:hover{background:var(--hover)}
+.item.cur{background:var(--accent-bg)}
+.item .t{flex:1;overflow:hidden;text-overflow:ellipsis}
+.item .d{font-size:11px;color:var(--muted)}
+.empty-note{color:var(--muted);font-size:12px;padding:2px 14px}
+#side .foot{border-top:1px solid var(--line);padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px}
+#status{color:var(--muted);flex:1 0 100%}
+#status.err{color:#d33}
+
+/* Main */
+#main{flex:1;height:100%;overflow:auto;display:flex;flex-direction:column}
+#banner{background:var(--warn-bg);color:var(--warn);font-size:12.5px;padding:5px 24px;display:flex;gap:10px;align-items:center}
+#banner[hidden]{display:none}
+#content{padding:16px 28px 120px;width:100%}
+.head .title{font-size:20px;font-weight:650;border:none;background:transparent;width:100%;padding:2px 0;outline:none}
+.head .title::placeholder{color:var(--faint)}
+.head .sub{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;color:var(--muted);font-size:12.5px;margin:2px 0 10px}
+.head .sub select{font-size:12.5px;max-width:200px;padding:0 4px}
+.head .sub .go{border:none;color:var(--accent);padding:0 3px}
+.head .sub .del{margin-left:auto;font-size:12px;color:var(--muted)}
+
+.strip{border:1px solid var(--line);border-radius:7px;margin:0 0 12px;padding:6px 10px;background:var(--panel)}
+.strip .h{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600;margin-bottom:2px}
+.strip .oi{display:flex;gap:6px;align-items:baseline;padding:1px 0}
+.strip .oi .t{cursor:pointer;flex:1}
+.strip .oi .t:hover{text-decoration:underline}
+.strip .none{color:var(--muted);font-size:12.5px}
+
+/* Outline */
+.outline{max-width:1100px}
+.node{position:relative}
+.kids{margin-left:11px;padding-left:10px;border-left:1px solid var(--line)}
+.row{display:flex;align-items:flex-start;gap:4px;min-height:22px;border-radius:4px;padding:0 4px}
+.row:hover{background:var(--hover)}
+.tw{width:14px;flex:0 0 14px;text-align:center;color:var(--faint);font-size:11px;line-height:22px;user-select:none}
+.tw.has{cursor:pointer;color:var(--muted)}
+.tw.has:hover{color:var(--text)}
+.ck{margin:5px 2px 0 0;opacity:0;cursor:pointer;flex:0 0 auto}
+.row:hover .ck,.ck.show,.ck:focus{opacity:1}
+.tx{flex:1;outline:none;min-width:40px;line-height:22px;white-space:pre-wrap;word-break:break-word}
+.tx:empty:before{content:attr(data-ph);color:var(--faint)}
+.tx a{color:var(--accent);text-decoration:underline;cursor:pointer}
+.row.done .tx{text-decoration:line-through;color:var(--done)}
+.meta{flex:0 0 auto;display:flex;gap:5px;align-items:center;font-size:11.5px;color:var(--muted);line-height:22px;white-space:nowrap}
+.pill{background:var(--pill);border-radius:9px;padding:0 7px;line-height:17px}
+.row.session{margin-top:10px;background:var(--session-bg)}
+.row.session .sdate{font-weight:650;color:var(--session);line-height:22px;margin-right:8px;white-space:nowrap;cursor:pointer}
+.row.session .sdate:hover{text-decoration:underline}
+.row.session .tx{color:var(--muted)}
+.node.flash>.row{animation:flash 1.2s}
+@keyframes flash{0%{background:var(--accent-bg)}100%{background:transparent}}
+
+/* Popover */
+#pop{position:fixed;z-index:10;background:var(--bg);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.18);padding:10px 12px;font-size:13px;display:none;min-width:230px}
+#pop label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0}
+#pop .btns{display:flex;gap:6px;justify-content:flex-end;margin-top:8px}
+
+/* Empty state */
+.welcome{max-width:620px;color:var(--muted);margin-top:40px}
+.welcome h2{color:var(--text);font-size:18px;margin:0 0 8px}
+.welcome table{border-collapse:collapse;margin-top:12px;font-size:13px}
+.welcome td{padding:2px 14px 2px 0}
+.welcome kbd{background:var(--pill);border-radius:4px;padding:0 5px;font:12px ui-monospace,Consolas,monospace;color:var(--text)}
+</style>
+</head>
+<body>
+<aside id="side">
+  <div class="top"><span class="brand">Ecco PIM</span></div>
+  <div class="new">
+    <button id="newMeeting" title="New meeting item">+ Meeting</button>
+    <button id="newDoc" title="New document">+ Document</button>
+  </div>
+  <input id="filter" placeholder="Filter titles…" autocomplete="off">
+  <div id="lists"></div>
+  <div class="foot">
+    <button id="exportBtn" title="Download a complete backup file">Export</button>
+    <button id="importBtn" title="Restore from a backup file">Import</button>
+    <button id="themeBtn" title="Theme">Theme: system</button>
+    <span id="status">Saved</span>
+    <input type="file" id="importFile" accept=".json,application/json" hidden>
+  </div>
+</aside>
+<main id="main">
+  <div id="banner" hidden></div>
+  <div id="content"></div>
+</main>
+<div id="pop"></div>
+
+<script>
+(function(){
+'use strict';
+
+/* ---------- utilities ---------- */
+const KEY = 'eccopim.v1';
+const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-5);
+const pad = n => String(n).padStart(2, '0');
+const isoOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const todayISO = () => isoOf(new Date());
+const parseISO = s => { const [y, m, d] = s.slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d); };
+const fmt = (s, opt) => s ? parseISO(s).toLocaleDateString(undefined, opt || { month: 'short', day: 'numeric' }) : '';
+const fmtLong = s => fmt(s, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+const esc = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const linkify = t => esc(t || '').replace(/(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+const $ = s => document.querySelector(s);
+
+/* ---------- state ---------- */
+function blank() { return { version: 1, containers: {}, bullets: {}, ui: { current: null, lastExport: null, theme: null } }; }
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) { const o = JSON.parse(raw); if (o && o.containers && o.bullets) { o.ui = o.ui || {}; return o; } }
+  } catch (e) { /* storage unavailable */ }
+  return null;
+}
+let S = load() || blank();
+
+let saveTimer = null;
+function setStatus(msg, err) { const s = $('#status'); s.textContent = msg; s.classList.toggle('err', !!err); }
+function save() {
+  setStatus('Saving…');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(KEY, JSON.stringify(S)); setStatus('Saved in this browser'); }
+    catch (e) { setStatus('Save failed. Export a backup now.', true); }
+  }, 250);
+}
+window.addEventListener('beforeunload', () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} });
+
+/* ---------- undo / redo ---------- */
+let undoStack = [], redoStack = [], typingSnap = false, typingTimer = null;
+const snapshot = () => JSON.stringify({ c: S.containers, b: S.bullets });
+function snap() { undoStack.push(snapshot()); if (undoStack.length > 150) undoStack.shift(); redoStack.length = 0; typingSnap = false; }
+function restoreFrom(str) {
+  const o = JSON.parse(str); S.containers = o.c; S.bullets = o.b;
+  if (S.ui.current && !S.containers[S.ui.current]) S.ui.current = null;
+  save(); renderAll();
+}
+function undo() { if (!undoStack.length) return; const f = focusInfo(); redoStack.push(snapshot()); restoreFrom(undoStack.pop()); refocus(f); }
+function redo() { if (!redoStack.length) return; const f = focusInfo(); undoStack.push(snapshot()); restoreFrom(redoStack.pop()); refocus(f); }
+
+/* ---------- model helpers ---------- */
+function kidsIndex(cid) {
+  const m = new Map();
+  for (const b of Object.values(S.bullets)) {
+    if (b.containerId !== cid) continue;
+    const k = b.parentId || '_';
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(b);
+  }
+  for (const a of m.values()) a.sort((x, y) => x.order - y.order);
+  return m;
+}
+const childList = (pid, cid) => Object.values(S.bullets).filter(x => x.containerId === cid && (x.parentId || null) === (pid || null)).sort((a, b) => a.order - b.order);
+const siblings = b => childList(b.parentId, b.containerId);
+function orderAfter(b) { const s = siblings(b); const n = s[s.indexOf(b) + 1]; return n ? (b.order + n.order) / 2 : b.order + 1; }
+function orderFirst(pid, cid) { const k = childList(pid, cid); return k.length ? k[0].order - 1 : 0; }
+function orderLast(pid, cid) { const k = childList(pid, cid); return k.length ? k[k.length - 1].order + 1 : 0; }
+function newBullet(cid, pid, order, extra) {
+  const b = Object.assign({ id: uid(), containerId: cid, parentId: pid || null, order, text: '', isSession: false, date: null, start: null, end: null, done: false, doneAt: null, links: [], collapsed: false, created: new Date().toISOString() }, extra || {});
+  S.bullets[b.id] = b; return b;
+}
+function deleteTree(id) { for (const k of Object.values(S.bullets).filter(x => x.parentId === id)) deleteTree(k.id); delete S.bullets[id]; }
+function treeEmpty(id) { const b = S.bullets[id]; if ((b.text || '').trim()) return false; return Object.values(S.bullets).filter(x => x.parentId === id).every(k => treeEmpty(k.id)); }
+function sessionsOf(cid) { return Object.values(S.bullets).filter(b => b.containerId === cid && b.isSession); }
+function hasTask(b) { return !!(b.done || b.start || b.end || (b.links && b.links.length)); }
+function effDate(b) { let x = b; while (x) { if (x.isSession) return x.date; x = x.parentId ? S.bullets[x.parentId] : null; } const c = S.containers[b.containerId]; return c ? c.created : null; }
+
+/* ---------- containers ---------- */
+function createContainer(type) {
+  snap();
+  const c = { id: uid(), type, title: '', created: todayISO(), prev: null, next: null };
+  S.containers[c.id] = c;
+  openContainer(c.id, true);
+}
+function cleanupEmptySession(cid) {
+  const c = S.containers[cid]; if (!c || c.type !== 'meeting') return;
+  for (const s of sessionsOf(cid)) if (s.date === todayISO() && treeEmpty(s.id)) deleteTree(s.id);
+}
+function openContainer(id, focusTitle) {
+  if (S.ui.current && S.ui.current !== id) cleanupEmptySession(S.ui.current);
+  S.ui.current = id;
+  const c = S.containers[id];
+  let focusId = null;
+  if (c.type === 'meeting') {
+    const today = todayISO();
+    let s = sessionsOf(id).find(x => x.date === today);
+    if (!s) {
+      for (const o of sessionsOf(id)) o.collapsed = true;
+      s = newBullet(id, null, orderFirst(null, id), { isSession: true, date: today });
+    }
+    s.collapsed = false;
+    let k = childList(s.id, id);
+    if (!k.length) k = [newBullet(id, s.id, 0)];
+    focusId = k[k.length - 1].id;
+  } else {
+    let k = childList(null, id);
+    if (!k.length) k = [newBullet(id, null, 0)];
+    focusId = k[0].id;
+  }
+  save(); renderAll();
+  if (focusTitle) { const t = $('.head .title'); if (t) t.focus(); }
+  else refocus({ id: focusId, pos: 'end' });
+}
+function setChain(a, field, bId) {
+  const other = field === 'prev' ? 'next' : 'prev';
+  const old = a[field];
+  if (old && S.containers[old] && S.containers[old][other] === a.id) S.containers[old][other] = null;
+  a[field] = bId || null;
+  if (bId) {
+    const B = S.containers[bId];
+    if (B[other] && B[other] !== a.id && S.containers[B[other]]) S.containers[B[other]][field] = null;
+    B[other] = a.id;
+  }
+}
+function deleteContainer(c) {
+  if (!confirm('Delete "' + (c.title || 'Untitled') + '" and all its notes?\n(Ctrl+Z undoes this.)')) return;
+  snap();
+  for (const b of Object.values(S.bullets)) if (b.containerId === c.id) delete S.bullets[b.id];
+  setChain(c, 'prev', null); setChain(c, 'next', null);
+  delete S.containers[c.id];
+  S.ui.current = null; save(); renderAll();
+}
+
+/* ---------- focus & caret ---------- */
+function getCaret(node) {
+  const s = getSelection(); if (!s.rangeCount) return 0;
+  const r = s.getRangeAt(0); if (!node.contains(r.startContainer)) return 0;
+  const pre = r.cloneRange(); pre.selectNodeContents(node); pre.setEnd(r.startContainer, r.startOffset);
+  return pre.toString().length;
+}
+function setCaret(node, pos) {
+  const len = node.textContent.length;
+  if (pos === 'end' || pos > len) pos = len;
+  const r = document.createRange();
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  let n, left = pos, placed = false;
+  while ((n = walker.nextNode())) { if (left <= n.length) { r.setStart(n, left); placed = true; break; } left -= n.length; }
+  if (!placed) { r.selectNodeContents(node); r.collapse(false); } else r.collapse(true);
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+function focusInfo() {
+  const a = document.activeElement;
+  if (a && a.classList && a.classList.contains('tx')) { const n = a.closest('.node'); return { id: n.dataset.id, pos: getCaret(a) }; }
+  return null;
+}
+function txOf(id) { const n = document.querySelector('.node[data-id="' + id + '"]'); return n ? n.querySelector(':scope > .row > .tx') : null; }
+function refocus(f) {
+  if (!f) return;
+  const t = txOf(f.id); if (!t) return;
+  t.focus(); setCaret(t, f.pos);
+  t.scrollIntoView({ block: 'nearest' });
+}
+function caretAtEdge(node, up) {
+  const s = getSelection(); if (!s.rangeCount) return true;
+  const r = s.getRangeAt(0).cloneRange(); r.collapse(true);
+  const rect = r.getClientRects()[0]; if (!rect) return true;
+  const er = node.getBoundingClientRect();
+  const lh = parseFloat(getComputedStyle(node).lineHeight) || 22;
+  return up ? rect.top - er.top < lh * 0.8 : er.bottom - rect.bottom < lh * 0.8;
+}
+function commit(focusId, pos) { save(); renderMain(); refocus({ id: focusId, pos }); }
+
+/* ---------- rendering ---------- */
+function applyTheme() {
+  const t = S.ui.theme;
+  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  $('#themeBtn').textContent = 'Theme: ' + (t || 'system');
+}
+function renderAll() { applyTheme(); renderSidebar(); renderBanner(); renderMain(); }
+
+function renderSidebar() {
+  const q = $('#filter').value.trim().toLowerCase();
+  const lists = $('#lists'); lists.innerHTML = '';
+  const last = {};
+  for (const b of Object.values(S.bullets)) if (b.isSession && (!last[b.containerId] || b.date > last[b.containerId])) last[b.containerId] = b.date;
+  const all = Object.values(S.containers).filter(c => !q || (c.title || 'untitled').toLowerCase().includes(q));
+  const sections = [
+    ['Meetings', all.filter(c => c.type === 'meeting').sort((a, b) => (last[b.id] || b.created).localeCompare(last[a.id] || a.created)), c => fmt(last[c.id] || c.created)],
+    ['Documents', all.filter(c => c.type === 'document').sort((a, b) => (a.title || '').localeCompare(b.title || '')), () => '']
+  ];
+  for (const [name, items, dateFn] of sections) {
+    const h = el('div', 'sec'); h.textContent = name; lists.appendChild(h);
+    if (!items.length) { const e = el('div', 'empty-note'); e.textContent = q ? 'No matches' : 'None yet'; lists.appendChild(e); }
+    for (const c of items) {
+      const it = el('div', 'item' + (c.id === S.ui.current ? ' cur' : ''));
+      const t = el('span', 't'); t.textContent = c.title || 'Untitled';
+      const d = el('span', 'd'); d.textContent = dateFn(c);
+      it.append(t, d);
+      it.onclick = () => openContainer(c.id);
+      lists.appendChild(it);
+    }
+  }
+  const note = el('div', 'sec'); note.textContent = 'People & Projects'; lists.appendChild(note);
+  const n2 = el('div', 'empty-note'); n2.textContent = 'Arrive in stage 2'; lists.appendChild(n2);
+}
+
+function renderBanner() {
+  const b = $('#banner');
+  const last = S.ui.lastExport ? new Date(S.ui.lastExport) : null;
+  const days = last ? (Date.now() - last.getTime()) / 864e5 : Infinity;
+  const hasData = Object.keys(S.bullets).length > 0;
+  if (hasData && days > 7) {
+    b.hidden = false;
+    b.innerHTML = '';
+    const s = el('span'); s.textContent = 'Stage 1 stores notes only in this browser. ' + (last ? 'Last backup: ' + fmt(isoOf(last)) + '.' : 'No backup yet.');
+    const btn = el('button'); btn.textContent = 'Export backup'; btn.onclick = exportData;
+    b.append(s, btn);
+  } else b.hidden = true;
+}
+
+function metaHTML(b, kidCount) {
+  const parts = [];
+  if (b.start || b.end) {
+    const r = b.start && b.end ? (b.start === b.end ? fmt(b.start) : fmt(b.start) + ' – ' + fmt(b.end)) : (b.start ? 'from ' + fmt(b.start) : 'by ' + fmt(b.end));
+    parts.push('<span class="pill" title="Right-click to change dates">' + r + '</span>');
+  }
+  if (b.done && b.doneAt) parts.push('<span title="Completed ' + esc(new Date(b.doneAt).toLocaleString()) + '">✓ ' + fmt(isoOf(new Date(b.doneAt))) + '</span>');
+  if (b.collapsed && kidCount) parts.push('<span>(' + kidCount + ')</span>');
+  return parts.join('');
+}
+
+function nodeEl(b, idx) {
+  const kids = idx.get(b.id) || [];
+  const n = el('div', 'node'); n.dataset.id = b.id;
+  const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : ''));
+  const tw = el('span', 'tw');
+  if (kids.length) { tw.textContent = b.collapsed ? '▸' : '▾'; tw.classList.add('has'); tw.title = 'Collapse / expand (Ctrl+.)'; }
+  else tw.textContent = b.isSession ? '' : '•';
+  row.appendChild(tw);
+  if (b.isSession) {
+    const d = el('span', 'sdate'); d.textContent = fmtLong(b.date); d.title = 'Click to change the date or delete this session'; row.appendChild(d);
+  } else {
+    const ck = el('input', 'ck' + (hasTask(b) ? ' show' : '')); ck.type = 'checkbox'; ck.checked = !!b.done; ck.tabIndex = -1;
+    ck.title = 'Done (Ctrl+Enter)'; row.appendChild(ck);
+  }
+  const tx = el('div', 'tx'); tx.contentEditable = 'true'; tx.spellcheck = true;
+  tx.dataset.ph = b.isSession ? 'Session topic (optional)' : '';
+  tx.innerHTML = linkify(b.text);
+  row.appendChild(tx);
+  const meta = el('span', 'meta'); meta.innerHTML = metaHTML(b, kids.length); row.appendChild(meta);
+  n.appendChild(row);
+  if (kids.length && !b.collapsed) { const k = el('div', 'kids'); for (const c of kids) k.appendChild(nodeEl(c, idx)); n.appendChild(k); }
+  return n;
+}
+
+function openItems(c) {
+  return Object.values(S.bullets)
+    .filter(b => b.containerId === c.id && !b.isSession && !b.done && (b.text || '').trim() && hasTask(b))
+    .sort((a, b) => (effDate(b) || '').localeCompare(effDate(a) || ''));
+}
+
+function renderMain() {
+  const ct = $('#content'); ct.innerHTML = '';
+  const c = S.ui.current && S.containers[S.ui.current];
+  if (!c) { ct.appendChild(welcome()); return; }
+
+  const head = el('div', 'head');
+  const title = el('input', 'title'); title.value = c.title || ''; title.placeholder = c.type === 'meeting' ? 'Meeting title' : 'Document title';
+  title.addEventListener('focus', () => snap());
+  title.addEventListener('input', () => { c.title = title.value; save(); renderSidebar(); });
+  title.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const target = document.querySelector('.outline .row:not(.session) > .tx') || document.querySelector('.outline .tx');
+    if (target) { target.focus(); setCaret(target, 'end'); }
+  });
+  head.appendChild(title);
+
+  const sub = el('div', 'sub');
+  const kind = el('span'); kind.textContent = (c.type === 'meeting' ? 'Meeting' : 'Document') + ' · created ' + fmt(c.created, { month: 'short', day: 'numeric', year: 'numeric' });
+  sub.appendChild(kind);
+  if (c.type === 'meeting') {
+    const others = Object.values(S.containers).filter(x => x.type === 'meeting' && x.id !== c.id).sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    for (const [field, label] of [['prev', 'Precursor'], ['next', 'Successor']]) {
+      const wrap = el('span'); wrap.append(label + ': ');
+      const sel = el('select');
+      sel.innerHTML = '<option value="">none</option>' + others.map(o => '<option value="' + o.id + '"' + (c[field] === o.id ? ' selected' : '') + '>' + esc(o.title || 'Untitled') + '</option>').join('');
+      sel.onchange = () => { snap(); setChain(c, field, sel.value); save(); renderMain(); };
+      wrap.appendChild(sel);
+      if (c[field] && S.containers[c[field]]) { const go = el('button', 'go'); go.textContent = field === 'prev' ? '← open' : 'open →'; go.onclick = () => openContainer(c[field]); wrap.appendChild(go); }
+      sub.appendChild(wrap);
+    }
+  }
+  const del = el('button', 'del'); del.textContent = 'Delete'; del.onclick = () => deleteContainer(c);
+  sub.appendChild(del);
+  head.appendChild(sub);
+  ct.appendChild(head);
+
+  if (c.type === 'meeting') {
+    const strip = el('div', 'strip');
+    const h = el('div', 'h'); h.textContent = 'Open items'; strip.appendChild(h);
+    const items = openItems(c);
+    if (!items.length) { const n = el('div', 'none'); n.textContent = 'None. Unchecked items with dates appear here (people links join them in stage 2).'; strip.appendChild(n); }
+    for (const b of items) {
+      const r = el('div', 'oi');
+      const ck = el('input'); ck.type = 'checkbox'; ck.onchange = () => { snap(); b.done = true; b.doneAt = new Date().toISOString(); save(); renderMain(); };
+      const t = el('span', 't'); t.textContent = b.text; t.onclick = () => reveal(b.id);
+      const m = el('span', 'meta'); m.innerHTML = '<span>from ' + fmt(effDate(b)) + '</span>' + metaHTML(b, 0);
+      r.append(ck, t, m); strip.appendChild(r);
+    }
+    ct.appendChild(strip);
+  }
+
+  const idx = kidsIndex(c.id);
+  const outline = el('div', 'outline');
+  const roots = (idx.get('_') || []).slice();
+  if (c.type === 'meeting') roots.sort((a, b) => (a.isSession === b.isSession) ? ((b.date || '').localeCompare(a.date || '') || a.order - b.order) : (a.isSession ? -1 : 1));
+  for (const b of roots) outline.appendChild(nodeEl(b, idx));
+  ct.appendChild(outline);
+}
+
+function welcome() {
+  const w = el('div', 'welcome');
+  w.innerHTML = '<h2>Pick a meeting or document, or start one.</h2>' +
+    '<p>Opening a meeting adds today\'s dated session at the top. Right-click a bullet to give it start and end dates.</p>' +
+    '<table>' + [
+      ['Enter', 'New bullet (splits at the cursor)'], ['Tab / Shift+Tab', 'Indent / outdent'],
+      ['Ctrl+Enter', 'Check / uncheck'], ['Ctrl+.', 'Collapse / expand'],
+      ['Ctrl+↑ / Ctrl+↓', 'Move bullet'], ['Ctrl+Z / Ctrl+Y', 'Undo / redo'],
+      ['Right-click', 'Set start / end dates']
+    ].map(([k, v]) => '<tr><td><kbd>' + k + '</kbd></td><td>' + v + '</td></tr>').join('') + '</table>';
+  const btns = el('p'); const a = el('button', 'primary'); a.textContent = '+ Meeting'; a.onclick = () => createContainer('meeting');
+  const b = el('button'); b.textContent = '+ Document'; b.onclick = () => createContainer('document');
+  btns.append(a, ' ', b); w.appendChild(btns);
+  return w;
+}
+
+function reveal(id) {
+  let x = S.bullets[id]; if (!x) return;
+  let p = x.parentId ? S.bullets[x.parentId] : null;
+  while (p) { p.collapsed = false; p = p.parentId ? S.bullets[p.parentId] : null; }
+  save(); renderMain(); refocus({ id, pos: 'end' });
+  const n = document.querySelector('.node[data-id="' + id + '"]');
+  if (n) { n.scrollIntoView({ block: 'center' }); n.classList.add('flash'); }
+}
+
+/* ---------- outline events ---------- */
+const content = $('#content');
+const bulletOf = node => S.bullets[node.closest('.node').dataset.id];
+
+content.addEventListener('mousedown', e => {
+  if (e.target.classList.contains('tw')) e.preventDefault();
+  const a = e.target.closest('.tx a');
+  if (a && document.activeElement !== a.closest('.tx')) e.preventDefault();
+});
+content.addEventListener('click', e => {
+  const a = e.target.closest('.tx a');
+  if (a && document.activeElement !== a.closest('.tx')) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); return; }
+  if (e.target.classList.contains('tw') && e.target.classList.contains('has')) {
+    const f = focusInfo(); const b = bulletOf(e.target);
+    b.collapsed = !b.collapsed; save(); renderMain(); refocus(f);
+  }
+});
+content.addEventListener('change', e => {
+  if (!e.target.classList.contains('ck')) return;
+  const b = bulletOf(e.target); snap();
+  b.done = e.target.checked; b.doneAt = b.done ? new Date().toISOString() : null;
+  save(); renderMain();
+});
+content.addEventListener('focusin', e => {
+  const t = e.target; if (!t.classList || !t.classList.contains('tx')) return;
+  if (t.querySelector('a')) { t.textContent = bulletOf(t).text; setCaret(t, 'end'); }
+});
+content.addEventListener('focusout', e => {
+  const t = e.target; if (!t.classList || !t.classList.contains('tx')) return;
+  const b = bulletOf(t); if (b && /https?:\/\//.test(b.text)) t.innerHTML = linkify(b.text);
+  typingSnap = false;
+});
+content.addEventListener('beforeinput', e => {
+  if (!e.target.classList || !e.target.classList.contains('tx')) return;
+  if (!typingSnap) { snap(); typingSnap = true; }
+  clearTimeout(typingTimer); typingTimer = setTimeout(() => { typingSnap = false; }, 1500);
+});
+content.addEventListener('input', e => {
+  const t = e.target; if (!t.classList || !t.classList.contains('tx')) return;
+  const b = bulletOf(t); b.text = t.textContent.replace(/\n/g, ' ');
+  save();
+});
+/* ---------- paste: keep outline structure ---------- */
+const GLYPH = /^(?:[•◦▪▫●○■□·‣⁃∙§➢➤►▸–—*-]|o(?=\t))\s*/;
+function toPx(v) {
+  const m = /(-?[\d.]+)\s*(px|pt|in|cm|mm|em|rem)?/i.exec(v || ''); if (!m) return 0;
+  const n = parseFloat(m[1]); const u = (m[2] || 'px').toLowerCase();
+  return n * ({ px: 1, pt: 4 / 3, in: 96, cm: 37.8, mm: 3.78, em: 16, rem: 16 }[u] || 1);
+}
+function htmlToLines(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('style,script,title,meta,link,img,svg').forEach(n => n.remove());
+  doc.querySelectorAll('[style]').forEach(n => { if (/mso-list\s*:\s*ignore/i.test(n.getAttribute('style'))) n.remove(); });
+  const out = []; let buf = '', bufIndent = 0;
+  const BLOCK = /^(P|DIV|LI|UL|OL|H[1-6]|BLOCKQUOTE|TR|TABLE|TBODY|SECTION|ARTICLE|PRE|HR|DL|DT|DD|ADDRESS)$/;
+  const flush = () => { const t = buf.replace(/[\s ]+/g, ' ').trim(); if (t) out.push({ text: t, indent: bufIndent }); buf = ''; };
+  const own = n => { const st = n.getAttribute && n.getAttribute('style') || ''; let v = 0;
+    const ml = /margin-left\s*:\s*([^;]+)/i.exec(st), pl = /padding-left\s*:\s*([^;]+)/i.exec(st);
+    if (ml) v += toPx(ml[1]); if (pl) v += toPx(pl[1]); return Math.max(0, v); };
+  (function walk(node, indent) {
+    for (const c of node.childNodes) {
+      if (c.nodeType === 3) { if (!buf.trim()) bufIndent = indent; buf += c.data; continue; }
+      if (c.nodeType !== 1) continue;
+      const tag = c.tagName;
+      if (tag === 'BR') { flush(); continue; }
+      if (BLOCK.test(tag)) {
+        flush();
+        let ind = indent + own(c);
+        if (tag === 'UL' || tag === 'OL' || tag === 'BLOCKQUOTE') ind += 40;
+        walk(c, ind); flush();
+      } else walk(c, indent);
+    }
+  })(doc.body, 0);
+  flush();
+  return out;
+}
+function plainToLines(text) {
+  return text.split(/\r?\n/).map(l => {
+    const m = /^[ \t ]*/.exec(l)[0];
+    const indent = [...m].reduce((a, ch) => a + (ch === '\t' ? 4 : 1), 0);
+    return { text: l.trim(), indent };
+  }).filter(x => x.text);
+}
+function normalizeLevels(lines) {
+  const ranks = [...new Set(lines.map(l => l.indent))].sort((a, b) => a - b);
+  let prev = -1;
+  for (const l of lines) {
+    let lv = ranks.indexOf(l.indent);
+    if (lv > prev + 1) lv = prev + 1;
+    l.level = lv; prev = lv;
+    l.text = l.text.replace(GLYPH, '').trim();
+  }
+  return lines.filter(l => l.text);
+}
+function rebase(lines) { // make the shallowest line level 0, then clamp jumps
+  if (!lines.length) return lines;
+  const min = Math.min(...lines.map(l => l.level)); let prev = -1;
+  for (const l of lines) { let lv = l.level - min; if (lv > prev + 1) lv = prev + 1; l.level = lv; prev = lv; }
+  return lines;
+}
+const HDR = /^(From|Sent|Date|To|Cc|Bcc|Subject|Attachments|Importance)\s*:/i;
+function parseHdrDate(s) {
+  let t = s.replace(/^(Sent|Date)\s*:\s*/i, '').replace(/^[A-Za-z]+,\s*/, '').replace(/\s+at\s+/i, ' ');
+  let d = new Date(t);
+  if (isNaN(d)) { const m = /(\d{1,2})\/(\d{1,2})\/(\d{2,4})/.exec(t); if (m) d = new Date(+(m[3].length === 2 ? '20' + m[3] : m[3]), +m[1] - 1, +m[2]); }
+  if (isNaN(d)) { const m = /([A-Za-z]+ \d{1,2},? \d{4})/.exec(t); if (m) d = new Date(m[1]); }
+  return isNaN(d) ? null : isoOf(d);
+}
+function splitThread(lines) {
+  const blocks = [{ date: null, lines: [] }]; let i = 0;
+  while (i < lines.length) {
+    if (HDR.test(lines[i].text)) {
+      let j = i, date = null;
+      while (j < lines.length && HDR.test(lines[j].text)) { if (/^(Sent|Date)\s*:/i.test(lines[j].text)) date = parseHdrDate(lines[j].text); j++; }
+      if (j - i >= 2 && date) { blocks.push({ date, lines: [] }); i = j; continue; }
+    }
+    if (!/^(-{2,}\s*Original Message\s*-{2,}|Begin forwarded message:?)$/i.test(lines[i].text)) blocks[blocks.length - 1].lines.push(lines[i]);
+    i++;
+  }
+  const dated = blocks.filter(b => b.date);
+  if (!dated.length) return null;
+  const withBody = blocks.filter(b => b.lines.length);
+  if (withBody.length >= 2) { // strip the signature: trailing lines every block shares
+    let k = 0;
+    while (true) {
+      const ref = withBody[0].lines[withBody[0].lines.length - 1 - k];
+      if (!ref || !withBody.every(b => { const l = b.lines[b.lines.length - 1 - k]; return l && l.text === ref.text; })) break;
+      k++;
+    }
+    if (k) for (const b of withBody) b.lines.splice(b.lines.length - k, k);
+  }
+  for (const b of blocks) rebase(b.lines);
+  return blocks.filter(b => b.lines.length);
+}
+function sessionOf(b) { let x = b; while (x) { if (x.isSession) return x; x = x.parentId ? S.bullets[x.parentId] : null; } return null; }
+function insertLines(lines, opt) {
+  // opt: {cid, parent, after (bullet or null), reuse (empty bullet to fill first), atEnd}
+  const stack = []; let last = null;
+  lines.forEach((l, n) => {
+    let nb;
+    if (l.level === 0) {
+      if (n === 0 && opt.reuse) { nb = opt.reuse; nb.text = l.text; }
+      else {
+        const prev0 = stack[0] || opt.after;
+        const ord = prev0 ? orderAfter(prev0) : (opt.atEnd ? orderLast(opt.parent, opt.cid) : orderFirst(opt.parent, opt.cid));
+        nb = newBullet(opt.cid, opt.parent, ord, { text: l.text });
+      }
+    } else {
+      const par = stack[l.level - 1]; par.collapsed = false;
+      nb = newBullet(opt.cid, par.id, orderLast(par.id, opt.cid), { text: l.text });
+    }
+    stack[l.level] = nb; stack.length = l.level + 1; last = nb;
+  });
+  return last;
+}
+function sessionFor(cid, date) {
+  let s = sessionsOf(cid).find(x => x.date === date);
+  if (!s) s = newBullet(cid, null, orderFirst(null, cid), { isSession: true, date, collapsed: true });
+  return s;
+}
+function pasteTarget(b) {
+  if (b.isSession) return { cid: b.containerId, parent: b.id, after: null, reuse: null, atEnd: false };
+  const empty = !(b.text || '').trim();
+  return { cid: b.containerId, parent: b.parentId, after: empty ? null : b, reuse: empty ? b : null, atEnd: false };
+}
+content.addEventListener('paste', e => {
+  const t = e.target.closest && e.target.closest('.tx'); if (!t) return;
+  e.preventDefault();
+  const cd = e.clipboardData || window.clipboardData;
+  const html = cd.getData('text/html'), plain = cd.getData('text/plain') || '';
+  let lines = normalizeLevels(html ? htmlToLines(html) : plainToLines(plain));
+  if (html && lines.length < 2 && /\n/.test(plain.trim())) lines = normalizeLevels(plainToLines(plain));
+  if (lines.length <= 1) { document.execCommand('insertText', false, lines.length ? lines[0].text : plain.replace(/\s+/g, ' ')); return; }
+  const b = bulletOf(t); const c = S.containers[b.containerId];
+  snap();
+  let last = null;
+  const blocks = c.type === 'meeting' ? splitThread(lines) : null;
+  if (blocks) {
+    const dated = blocks.filter(x => x.date);
+    const range = [...new Set(dated.map(x => x.date))].sort();
+    const msg = 'This looks like an email thread with ' + dated.length + ' dated note' + (dated.length > 1 ? 's' : '') +
+      (range.length ? ' (' + fmt(range[0]) + (range.length > 1 ? ' to ' + fmt(range[range.length - 1]) : '') + ')' : '') +
+      (blocks.some(x => !x.date) ? ', plus an undated note at the top, which stays where you pasted' : '') +
+      '.\n\nOK: put each note in its own dated session, and drop the email headers and repeated signature.\nCancel: paste everything here as one outline.';
+    if (confirm(msg)) {
+      for (const blk of blocks) {
+        if (!blk.date) { last = insertLines(blk.lines, pasteTarget(b)) || last; continue; }
+        const s = sessionFor(b.containerId, blk.date);
+        const l = insertLines(blk.lines, { cid: b.containerId, parent: s.id, after: null, reuse: null, atEnd: true });
+        if (!last) last = l;
+      }
+      commit(last.id, 'end'); return;
+    }
+  }
+  last = insertLines(rebase(lines), pasteTarget(b));
+  commit(last.id, 'end');
+});
+
+content.addEventListener('keydown', e => {
+  const t = e.target; if (!t.classList || !t.classList.contains('tx')) return;
+  const b = bulletOf(t); const cid = b.containerId;
+  const mod = e.ctrlKey || e.metaKey;
+
+  if (e.key === 'Enter' && mod) {
+    e.preventDefault(); if (b.isSession) return;
+    snap(); b.done = !b.done; b.doneAt = b.done ? new Date().toISOString() : null;
+    commit(b.id, getCaret(t)); return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const pos = getCaret(t), text = t.textContent;
+    snap();
+    if (b.isSession) { b.collapsed = false; const nb = newBullet(cid, b.id, orderFirst(b.id, cid)); commit(nb.id, 0); return; }
+    if (pos === 0 && text.length > 0) {
+      const s = siblings(b), p = s[s.indexOf(b) - 1];
+      newBullet(cid, b.parentId, p ? (p.order + b.order) / 2 : b.order - 1);
+      commit(b.id, 0); return;
+    }
+    b.text = text.slice(0, pos);
+    const after = text.slice(pos);
+    const kids = childList(b.id, cid);
+    const nb = (kids.length && !b.collapsed)
+      ? newBullet(cid, b.id, orderFirst(b.id, cid), { text: after })
+      : newBullet(cid, b.parentId, orderAfter(b), { text: after });
+    commit(nb.id, 0); return;
+  }
+  if (e.key === 'Backspace' && !mod) {
+    const sel = getSelection();
+    if (!sel.isCollapsed || getCaret(t) !== 0 || b.isSession) return;
+    const list = [...content.querySelectorAll('.outline .tx')];
+    const prevTx = list[list.indexOf(t) - 1];
+    const hasKids = childList(b.id, cid).length > 0;
+    if (!prevTx || hasKids) return;
+    const prev = bulletOf(prevTx);
+    e.preventDefault(); snap();
+    if (!t.textContent) { deleteTree(b.id); commit(prev.id, 'end'); return; }
+    if (prev.isSession) return;
+    const at = prev.text.length; prev.text += t.textContent; deleteTree(b.id); commit(prev.id, at); return;
+  }
+  if (e.key === 'Tab') {
+    e.preventDefault(); if (b.isSession) return;
+    const pos = getCaret(t);
+    if (e.shiftKey) {
+      if (!b.parentId) return;
+      const parent = S.bullets[b.parentId]; if (parent.isSession) return;
+      snap(); const ord = orderAfter(parent); b.parentId = parent.parentId; b.order = ord;
+    } else {
+      const s = siblings(b), p = s[s.indexOf(b) - 1]; if (!p) return;
+      snap(); b.order = orderLast(p.id, cid); b.parentId = p.id; p.collapsed = false;
+    }
+    commit(b.id, pos); return;
+  }
+  if (mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    e.preventDefault(); if (b.isSession) return;
+    const s = siblings(b), i = s.indexOf(b), o = s[e.key === 'ArrowUp' ? i - 1 : i + 1];
+    if (!o || o.isSession) return;
+    snap(); const tmp = b.order; b.order = o.order; o.order = tmp;
+    commit(b.id, getCaret(t)); return;
+  }
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey) {
+    const up = e.key === 'ArrowUp';
+    if (!caretAtEdge(t, up)) return;
+    const list = [...content.querySelectorAll('.outline .tx')];
+    const nx = list[list.indexOf(t) + (up ? -1 : 1)];
+    if (!nx) return;
+    e.preventDefault(); const pos = getCaret(t); nx.focus(); setCaret(nx, Math.min(pos, nx.textContent.length)); return;
+  }
+  if (mod && e.key === '.') {
+    e.preventDefault();
+    if (childList(b.id, cid).length) { b.collapsed = !b.collapsed; commit(b.id, getCaret(t)); }
+    return;
+  }
+  if (e.key === 'Escape') t.blur();
+});
+
+/* ---------- date popover ---------- */
+const pop = $('#pop');
+let popFor = null;
+function placePop(x, y) {
+  pop.style.display = 'block';
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  pop.style.left = Math.min(x, innerWidth - w - 8) + 'px';
+  pop.style.top = Math.min(y, innerHeight - h - 8) + 'px';
+}
+function sessionPop(s, x, y) {
+  popFor = s;
+  const n = Object.values(S.bullets).filter(k => k.parentId === s.id).length;
+  pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">Session</div>' +
+    '<label>Date <input type="date" id="sDate" value="' + s.date + '"></label>' +
+    '<div style="color:var(--muted);font-size:12px">Moving to a date that already has a session merges the two.</div>' +
+    '<div class="btns"><button id="sDel">Delete session</button><button id="sDone" class="primary">Done</button></div>';
+  placePop(x, y);
+  $('#sDate').onchange = () => {
+    const nd = $('#sDate').value; if (!nd || nd === s.date) return;
+    snap();
+    const other = sessionsOf(s.containerId).find(o => o.id !== s.id && o.date === nd);
+    if (other) {
+      for (const k of childList(s.id, s.containerId)) { k.parentId = other.id; k.order = orderLast(other.id, s.containerId); }
+      delete S.bullets[s.id]; other.collapsed = false; popFor = null;
+    } else s.date = nd;
+    save(); renderMain(); closePop();
+  };
+  $('#sDel').onclick = () => {
+    if (n && !confirm('Delete the ' + fmtLong(s.date) + ' session and everything under it?\n(Ctrl+Z undoes this.)')) return;
+    snap(); deleteTree(s.id); popFor = null; save(); renderMain(); closePop();
+  };
+  $('#sDone').onclick = closePop;
+}
+content.addEventListener('click', e => {
+  if (!e.target.classList.contains('sdate')) return;
+  sessionPop(bulletOf(e.target), e.clientX, e.clientY);
+});
+content.addEventListener('contextmenu', e => {
+  const row = e.target.closest('.row'); if (!row) return;
+  if (row.classList.contains('session')) { e.preventDefault(); sessionPop(bulletOf(row), e.clientX, e.clientY); return; }
+  e.preventDefault();
+  popFor = bulletOf(row);
+  const b = popFor;
+  pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">Dates</div>' +
+    '<label>Start <input type="date" id="pStart" value="' + (b.start || '') + '"></label>' +
+    '<label>End <input type="date" id="pEnd" value="' + (b.end || '') + '"></label>' +
+    '<div style="color:var(--muted);font-size:12px">Session date: ' + (effDate(b) ? fmtLong(effDate(b)) : 'none') + '</div>' +
+    '<div class="btns"><button id="pClear">Clear</button><button id="pDone" class="primary">Done</button></div>';
+  pop.style.display = 'block';
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  pop.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px';
+  pop.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px';
+  let snapped = false;
+  const apply = () => {
+    if (!snapped) { snap(); snapped = true; }
+    let s = $('#pStart').value || null, en = $('#pEnd').value || null;
+    if (s && en && en < s) { en = s; $('#pEnd').value = s; }
+    b.start = s; b.end = en; save(); renderMain();
+  };
+  $('#pStart').onchange = apply; $('#pEnd').onchange = apply;
+  $('#pClear').onclick = () => { $('#pStart').value = ''; $('#pEnd').value = ''; apply(); closePop(); };
+  $('#pDone').onclick = closePop;
+  $('#pStart').focus();
+});
+function closePop() { pop.style.display = 'none'; const id = popFor && popFor.id; popFor = null; if (id) refocus({ id, pos: 'end' }); }
+document.addEventListener('mousedown', e => { if (pop.style.display === 'block' && !pop.contains(e.target)) closePop(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && pop.style.display === 'block') { closePop(); return; }
+  const mod = e.ctrlKey || e.metaKey;
+  const inField = e.target.matches && e.target.matches('input, select, textarea');
+  if (mod && !inField && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if (mod && !inField && (e.key === 'y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) { e.preventDefault(); redo(); }
+}, true);
+
+/* ---------- sidebar & footer ---------- */
+$('#newMeeting').onclick = () => createContainer('meeting');
+$('#newDoc').onclick = () => createContainer('document');
+$('#filter').addEventListener('input', renderSidebar);
+$('#themeBtn').onclick = () => { const order = [null, 'light', 'dark']; S.ui.theme = order[(order.indexOf(S.ui.theme || null) + 1) % 3]; save(); applyTheme(); };
+
+function exportData() {
+  const data = JSON.stringify({ app: 'ecco-pim', version: 1, exportedAt: new Date().toISOString(), containers: S.containers, bullets: S.bullets }, null, 1);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+  a.download = 'pim-backup-' + todayISO() + '.json';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  S.ui.lastExport = new Date().toISOString(); save(); renderBanner();
+}
+$('#exportBtn').onclick = exportData;
+$('#importBtn').onclick = () => $('#importFile').click();
+$('#importFile').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const o = JSON.parse(r.result);
+      if (!o || typeof o.containers !== 'object' || typeof o.bullets !== 'object') throw new Error('Not a backup file');
+      const n = Object.keys(o.containers).length, m = Object.keys(o.bullets).length;
+      if (!confirm('Replace everything here with this backup (' + n + ' meetings/documents, ' + m + ' bullets)?\n(Ctrl+Z undoes this.)')) return;
+      snap(); S.containers = o.containers; S.bullets = o.bullets; S.ui.current = null; save(); renderAll();
+    } catch (err) { alert('Could not import: ' + err.message); }
+    e.target.value = '';
+  };
+  r.readAsText(f);
+};
+
+/* ---------- start ---------- */
+(function startupCleanup() {
+  for (const c of Object.values(S.containers)) {
+    if (c.type !== 'meeting') continue;
+    for (const s of sessionsOf(c.id)) if (!(c.id === S.ui.current && s.date === todayISO()) && treeEmpty(s.id)) deleteTree(s.id);
+  }
+})();
+if (S.ui.current && S.containers[S.ui.current]) openContainer(S.ui.current); else { S.ui.current = null; renderAll(); }
+setStatus('Saved in this browser');
+})();
+</script>
+</body>
+</html>
