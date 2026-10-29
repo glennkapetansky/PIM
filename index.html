@@ -10,6 +10,7 @@
   --line:#e3e1dc; --accent:#2f6fde; --accent-bg:#e8effc; --hover:#ecebe6;
   --done:#9a978f; --warn-bg:#fff4d6; --warn:#7a5a00; --session:#5641b8; --session-bg:#f1eefc;
   --pill:#eceae4;
+  --per:#1d6b4f; --per-bg:#e3f2ea; --prj:#8a4b00; --prj-bg:#fbeedb;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -17,6 +18,7 @@
     --line:#33343a; --accent:#6b9cff; --accent-bg:#26324a; --hover:#2b2c30;
     --done:#77756f; --warn-bg:#3a3220; --warn:#e8c56a; --session:#ab9dff; --session-bg:#2a2640;
     --pill:#2e2f34;
+    --per:#7fd3ae; --per-bg:#1f3a2f; --prj:#f0b46a; --prj-bg:#3d2e1a;
   }
 }
 :root[data-theme="dark"]{
@@ -24,6 +26,7 @@
   --line:#33343a; --accent:#6b9cff; --accent-bg:#26324a; --hover:#2b2c30;
   --done:#77756f; --warn-bg:#3a3220; --warn:#e8c56a; --session:#ab9dff; --session-bg:#2a2640;
   --pill:#2e2f34;
+  --per:#7fd3ae; --per-bg:#1f3a2f; --prj:#f0b46a; --prj-bg:#3d2e1a;
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
@@ -48,6 +51,17 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .item .t{flex:1;overflow:hidden;text-overflow:ellipsis}
 .item .d{font-size:11px;color:var(--muted)}
 .empty-note{color:var(--muted);font-size:12px;padding:2px 14px}
+.fsec{display:flex;align-items:center}
+.fsec span{flex:1}
+.fsec .add{border:none;padding:0 6px;font-size:15px;line-height:1;color:var(--muted)}
+.fsec .add:hover{color:var(--text)}
+.item.folder{padding-right:10px}
+.item.folder .ftw{width:12px;flex:0 0 12px;color:var(--muted);font-size:10px;cursor:pointer}
+.item .cnt{font-size:11px;color:var(--muted);background:var(--pill);border-radius:8px;padding:0 6px}
+.item.drop,.fsec.drop{background:var(--accent-bg);outline:1px dashed var(--accent);outline-offset:-1px}
+.item.flash{animation:flash 1.2s}
+#pop .menu button{display:block;width:100%;text-align:left;border:none;padding:4px 6px}
+#pop select{max-width:200px}
 #side .foot{border-top:1px solid var(--line);padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px}
 #status{color:var(--muted);flex:1 0 100%}
 #status.err{color:#d33}
@@ -88,6 +102,32 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .row.done .tx{text-decoration:line-through;color:var(--done)}
 .meta{flex:0 0 auto;display:flex;gap:5px;align-items:center;font-size:11.5px;color:var(--muted);line-height:22px;white-space:nowrap}
 .pill{background:var(--pill);border-radius:9px;padding:0 7px;line-height:17px}
+.tag{border-radius:9px;padding:0 7px;line-height:17px;cursor:pointer;max-width:160px;overflow:hidden;text-overflow:ellipsis;border:1px solid transparent;white-space:nowrap}
+.tag.person{background:var(--per-bg);color:var(--per)}
+.tag.project{background:var(--prj-bg);color:var(--prj)}
+.tag.pri{font-weight:700;border-color:currentColor}
+.tag .x{margin-left:5px;opacity:.55}
+.tag .x:hover{opacity:1}
+.tw[draggable="true"]{cursor:grab}
+.row.drop-before{box-shadow:inset 0 2px 0 var(--accent)}
+.row.drop-after{box-shadow:inset 0 -2px 0 var(--accent)}
+.row.drop-child{background:var(--accent-bg);box-shadow:inset 3px 0 0 var(--accent)}
+.head .trow{display:flex;align-items:center}
+.grip{cursor:grab;color:var(--faint);font-size:15px;padding:0 6px 0 0;user-select:none}
+.grip:hover{color:var(--text)}
+.head .sub .chips{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center}
+.additem{width:100%;max-width:1100px;margin:2px 0 10px;padding:5px 9px;border-radius:7px}
+.vsec{display:flex;gap:6px;align-items:center;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600;margin:16px 0 2px;max-width:1100px;border-bottom:1px solid var(--line);padding-bottom:2px}
+.vsec.tog{cursor:pointer}
+.vsec.tog:hover{color:var(--text)}
+.vsec .n{font-weight:500}
+.src{font-size:11.5px;color:var(--muted);margin:7px 0 0 22px;cursor:pointer;width:max-content;max-width:100%}
+.src:hover{color:var(--accent);text-decoration:underline}
+.vgroup.dim .row .tx{opacity:.62}
+.vempty{color:var(--muted);font-size:13px;padding:6px 4px}
+.vlink{padding:2px 4px;cursor:pointer;display:flex;gap:10px;border-radius:4px}
+.vlink:hover{background:var(--hover)}
+.vlink .d{color:var(--muted);font-size:12px}
 .row.session{margin-top:10px;background:var(--session-bg)}
 .row.session .sdate{font-weight:650;color:var(--session);line-height:22px;margin-right:8px;white-space:nowrap;cursor:pointer}
 .row.session .sdate:hover{text-decoration:underline}
@@ -150,7 +190,7 @@ const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.cla
 const $ = s => document.querySelector(s);
 
 /* ---------- state ---------- */
-function blank() { return { version: 1, containers: {}, bullets: {}, ui: { current: null, lastExport: null, theme: null } }; }
+function blank() { return { version: 2, containers: {}, bullets: {}, folders: {}, ui: { current: null, folder: null, lastExport: null, theme: null } }; }
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -159,6 +199,13 @@ function load() {
   return null;
 }
 let S = load() || blank();
+function ensureModel() {
+  if (!S.folders) S.folders = {};
+  if (!S.folders.me) S.folders.me = { id: 'me', kind: 'person', name: 'Me', parentId: null, order: -1, collapsed: false };
+  for (const c of Object.values(S.containers)) if (!c.links) c.links = [];
+  for (const b of Object.values(S.bullets)) if (!b.links) b.links = [];
+}
+ensureModel();
 
 let saveTimer = null;
 function setStatus(msg, err) { const s = $('#status'); s.textContent = msg; s.classList.toggle('err', !!err); }
@@ -174,11 +221,12 @@ window.addEventListener('beforeunload', () => { try { localStorage.setItem(KEY, 
 
 /* ---------- undo / redo ---------- */
 let undoStack = [], redoStack = [], typingSnap = false, typingTimer = null;
-const snapshot = () => JSON.stringify({ c: S.containers, b: S.bullets });
+const snapshot = () => JSON.stringify({ c: S.containers, b: S.bullets, f: S.folders });
 function snap() { undoStack.push(snapshot()); if (undoStack.length > 150) undoStack.shift(); redoStack.length = 0; typingSnap = false; }
 function restoreFrom(str) {
-  const o = JSON.parse(str); S.containers = o.c; S.bullets = o.b;
+  const o = JSON.parse(str); S.containers = o.c; S.bullets = o.b; if (o.f) S.folders = o.f; ensureModel();
   if (S.ui.current && !S.containers[S.ui.current]) S.ui.current = null;
+  if (S.ui.folder && !S.folders[S.ui.folder]) S.ui.folder = null;
   save(); renderAll();
 }
 function undo() { if (!undoStack.length) return; const f = focusInfo(); redoStack.push(snapshot()); restoreFrom(undoStack.pop()); refocus(f); }
@@ -209,12 +257,121 @@ function deleteTree(id) { for (const k of Object.values(S.bullets).filter(x => x
 function treeEmpty(id) { const b = S.bullets[id]; if ((b.text || '').trim()) return false; return Object.values(S.bullets).filter(x => x.parentId === id).every(k => treeEmpty(k.id)); }
 function sessionsOf(cid) { return Object.values(S.bullets).filter(b => b.containerId === cid && b.isSession); }
 function hasTask(b) { return !!(b.done || b.start || b.end || (b.links && b.links.length)); }
-function effDate(b) { let x = b; while (x) { if (x.isSession) return x.date; x = x.parentId ? S.bullets[x.parentId] : null; } const c = S.containers[b.containerId]; return c ? c.created : null; }
+function effDate(b) {
+  let x = b; while (x) { if (x.isSession) return x.date; x = x.parentId ? S.bullets[x.parentId] : null; }
+  if (b.created) return isoOf(new Date(b.created));
+  const c = S.containers[b.containerId]; return c ? c.created : null;
+}
+
+/* ---------- people & projects (folders) and links ---------- */
+const KIND_LABEL = { person: 'People', project: 'Projects' };
+function folderKids(pid, kind) {
+  return Object.values(S.folders).filter(f => (f.parentId || null) === (pid || null) && (!kind || f.kind === kind))
+    .sort((a, b) => (a.order - b.order) || (a.name || '').localeCompare(b.name || ''));
+}
+function flatFolders(kind) { const out = []; (function walk(pid, d) { for (const f of folderKids(pid, kind)) { out.push([f, d]); walk(f.id, d + 1); } })(null, 0); return out; }
+function folderDesc(fid) {
+  const s = new Set([fid]); let grew = true;
+  while (grew) { grew = false; for (const f of Object.values(S.folders)) if (f.parentId && s.has(f.parentId) && !s.has(f.id)) { s.add(f.id); grew = true; } }
+  return s;
+}
+function folderPath(fid) { const p = []; let f = S.folders[fid]; while (f) { p.unshift(f.name || 'Untitled'); f = f.parentId ? S.folders[f.parentId] : null; } return p.join(' › '); }
+const folderName = fid => S.folders[fid] ? (S.folders[fid].name || 'Untitled') : '?';
+const liveLinks = t => (t.links || []).filter(l => S.folders[l.folder]);
+function addLink(t, fid) {
+  t.links = t.links || [];
+  if (t.links.some(l => l.folder === fid)) return false;
+  const kind = S.folders[fid].kind;
+  const hasPri = liveLinks(t).some(l => S.folders[l.folder].kind === kind && l.role === 'primary');
+  t.links.push({ folder: fid, role: hasPri ? 'secondary' : 'primary' });
+  return true;
+}
+function setRole(t, fid, role) {
+  const kind = S.folders[fid].kind;
+  for (const l of liveLinks(t)) {
+    if (l.folder === fid) l.role = role;
+    else if (role === 'primary' && S.folders[l.folder].kind === kind) l.role = 'secondary';
+  }
+}
+function removeLink(t, fid) {
+  const was = (t.links || []).find(l => l.folder === fid);
+  const kind = S.folders[fid] && S.folders[fid].kind;
+  t.links = (t.links || []).filter(l => l.folder !== fid);
+  if (was && was.role === 'primary' && kind) { const n = liveLinks(t).find(l => S.folders[l.folder].kind === kind); if (n) n.role = 'primary'; }
+}
+function containerProject(c) {
+  if (!c) return null;
+  const ls = liveLinks(c).filter(l => S.folders[l.folder].kind === 'project');
+  const p = ls.find(l => l.role === 'primary') || ls[0];
+  return p ? p.folder : null;
+}
+const hasPersonLink = b => liveLinks(b).some(l => S.folders[l.folder].kind === 'person');
+function inboxFor(fid) {
+  const id = 'inbox-' + fid;
+  if (!S.containers[id]) S.containers[id] = { id, type: 'inbox', folderId: fid, title: '', created: todayISO(), links: [] };
+  return S.containers[id];
+}
+// How does bullet b belong to folder set D? Explicit links win; a project also collects task-like
+// bullets (person link, dates, or checked) from meetings/documents assigned to it.
+function roleIn(b, D, kind) {
+  let r = null;
+  for (const l of liveLinks(b)) if (D.has(l.folder)) { if (l.role === 'primary') return { role: 'primary' }; r = 'secondary'; }
+  if (r) return { role: r };
+  if (kind === 'project' && !liveLinks(b).some(l => S.folders[l.folder].kind === 'project')) {
+    const p = containerProject(S.containers[b.containerId]);
+    if (p && D.has(p) && (hasPersonLink(b) || b.start || b.end || b.done)) return { role: 'primary', inherited: true };
+  }
+  return null;
+}
+function folderMembers(fid) {
+  const D = folderDesc(fid), kind = S.folders[fid].kind, m = new Map();
+  for (const b of Object.values(S.bullets)) {
+    if (b.isSession || !S.containers[b.containerId]) continue;
+    const r = roleIn(b, D, kind); if (r) m.set(b.id, r);
+  }
+  const roots = [];
+  for (const [id, r] of m) { // a member inside another member's subtree is shown inside it, not twice
+    let p = S.bullets[id].parentId ? S.bullets[S.bullets[id].parentId] : null, covered = false;
+    while (p) { if (m.has(p.id)) { covered = true; break; } p = p.parentId ? S.bullets[p.parentId] : null; }
+    if (!covered) roots.push(Object.assign({ b: S.bullets[id] }, r));
+  }
+  return roots;
+}
+const openCount = fid => folderMembers(fid).filter(x => !x.b.done && x.role === 'primary').length;
+function newFolder(kind, parentId) {
+  snap();
+  const f = { id: uid(), kind, name: '', parentId: parentId || null, order: 0, collapsed: false };
+  if (parentId && S.folders[parentId]) S.folders[parentId].collapsed = false;
+  S.folders[f.id] = f;
+  openFolder(f.id, true);
+}
+function openFolder(fid, focusTitle) {
+  if (S.ui.current) cleanupEmptySession(S.ui.current);
+  S.ui.current = null; S.ui.folder = fid;
+  save(); renderAll();
+  if (focusTitle) { const t = $('.head .title'); if (t) t.focus(); }
+  $('#main').scrollTop = 0;
+}
+function deleteFolder(fid) {
+  const f = S.folders[fid]; if (!f || fid === 'me') return;
+  const ib = S.containers['inbox-' + fid];
+  const nIb = ib ? Object.values(S.bullets).filter(b => b.containerId === ib.id).length : 0;
+  if (!confirm('Delete "' + (f.name || 'Untitled') + '"?\n\nLinks to it are removed; the notes themselves stay in their meetings and documents.' +
+    (nIb ? '\n' + nIb + ' item(s) typed directly into it will be deleted.' : '') +
+    (folderKids(fid).length ? '\nIts sub-folders move up one level.' : '') + '\n(Ctrl+Z undoes this.)')) return;
+  snap();
+  for (const k of folderKids(fid)) k.parentId = f.parentId;
+  for (const t of [...Object.values(S.bullets), ...Object.values(S.containers)]) if ((t.links || []).some(l => l.folder === fid)) removeLink(t, fid);
+  if (ib) { for (const b of Object.values(S.bullets)) if (b.containerId === ib.id) delete S.bullets[b.id]; delete S.containers[ib.id]; }
+  delete S.folders[fid];
+  if (S.ui.folder === fid) S.ui.folder = null;
+  save(); renderAll();
+}
 
 /* ---------- containers ---------- */
 function createContainer(type) {
   snap();
-  const c = { id: uid(), type, title: '', created: todayISO(), prev: null, next: null };
+  const c = { id: uid(), type, title: '', created: todayISO(), prev: null, next: null, links: [] };
   S.containers[c.id] = c;
   openContainer(c.id, true);
 }
@@ -224,7 +381,7 @@ function cleanupEmptySession(cid) {
 }
 function openContainer(id, focusTitle) {
   if (S.ui.current && S.ui.current !== id) cleanupEmptySession(S.ui.current);
-  S.ui.current = id;
+  S.ui.current = id; S.ui.folder = null;
   const c = S.containers[id];
   let focusId = null;
   if (c.type === 'meeting') {
@@ -304,7 +461,7 @@ function caretAtEdge(node, up) {
   const lh = parseFloat(getComputedStyle(node).lineHeight) || 22;
   return up ? rect.top - er.top < lh * 0.8 : er.bottom - rect.bottom < lh * 0.8;
 }
-function commit(focusId, pos) { save(); renderMain(); refocus({ id: focusId, pos }); }
+function commit(focusId, pos) { save(); renderSidebar(); renderMain(); refocus({ id: focusId, pos }); }
 
 /* ---------- rendering ---------- */
 function applyTheme() {
@@ -317,6 +474,33 @@ function renderAll() { applyTheme(); renderSidebar(); renderBanner(); renderMain
 function renderSidebar() {
   const q = $('#filter').value.trim().toLowerCase();
   const lists = $('#lists'); lists.innerHTML = '';
+  for (const kind of ['person', 'project']) {
+    const h = el('div', 'sec fsec'); h.dataset.kind = kind;
+    const lab = el('span'); lab.textContent = KIND_LABEL[kind];
+    const add = el('button', 'add'); add.textContent = '+'; add.title = 'New ' + (kind === 'person' ? 'person' : 'project');
+    add.onclick = () => newFolder(kind, null);
+    h.append(lab, add); lists.appendChild(h);
+    const rows = [];
+    if (q) {
+      for (const f of Object.values(S.folders)) if (f.kind === kind && (f.name || '').toLowerCase().includes(q)) rows.push([f, 0]);
+      rows.sort((a, b) => (a[0].name || '').localeCompare(b[0].name || ''));
+    } else (function walk(pid, depth) { for (const f of folderKids(pid, kind)) { rows.push([f, depth]); if (!f.collapsed) walk(f.id, depth + 1); } })(null, 0);
+    if (!rows.length) { const e = el('div', 'empty-note'); e.textContent = q ? 'No matches' : 'Click + to add one'; lists.appendChild(e); }
+    for (const [f, depth] of rows) {
+      const it = el('div', 'item folder' + (f.id === S.ui.folder ? ' cur' : '')); it.dataset.fid = f.id; it.draggable = true;
+      it.style.paddingLeft = (8 + depth * 14) + 'px';
+      it.title = folderPath(f.id) + ' · drop bullets here to link them';
+      const tw = el('span', 'ftw'); const hasKids = !q && folderKids(f.id).length > 0;
+      tw.textContent = hasKids ? (f.collapsed ? '▸' : '▾') : '';
+      if (hasKids) tw.onclick = ev => { ev.stopPropagation(); f.collapsed = !f.collapsed; save(); renderSidebar(); };
+      const t = el('span', 't'); t.textContent = (f.name || 'Untitled') + (f.id === 'me' ? ' (To-Do)' : '');
+      it.append(tw, t);
+      const n = openCount(f.id);
+      if (n) { const d = el('span', 'cnt'); d.textContent = n; d.title = n + ' open item' + (n > 1 ? 's' : ''); it.appendChild(d); }
+      it.onclick = () => openFolder(f.id);
+      lists.appendChild(it);
+    }
+  }
   const last = {};
   for (const b of Object.values(S.bullets)) if (b.isSession && (!last[b.containerId] || b.date > last[b.containerId])) last[b.containerId] = b.date;
   const all = Object.values(S.containers).filter(c => !q || (c.title || 'untitled').toLowerCase().includes(q));
@@ -336,8 +520,6 @@ function renderSidebar() {
       lists.appendChild(it);
     }
   }
-  const note = el('div', 'sec'); note.textContent = 'People & Projects'; lists.appendChild(note);
-  const n2 = el('div', 'empty-note'); n2.textContent = 'Arrive in stage 2'; lists.appendChild(n2);
 }
 
 function renderBanner() {
@@ -348,14 +530,27 @@ function renderBanner() {
   if (hasData && days > 7) {
     b.hidden = false;
     b.innerHTML = '';
-    const s = el('span'); s.textContent = 'Stage 1 stores notes only in this browser. ' + (last ? 'Last backup: ' + fmt(isoOf(last)) + '.' : 'No backup yet.');
+    const s = el('span'); s.textContent = 'Notes are stored only in this browser until sync arrives (stage 3). ' + (last ? 'Last backup: ' + fmt(isoOf(last)) + '.' : 'No backup yet.');
     const btn = el('button'); btn.textContent = 'Export backup'; btn.onclick = exportData;
     b.append(s, btn);
   } else b.hidden = true;
 }
 
+function tagHTML(l, removable) {
+  const f = S.folders[l.folder], pri = l.role === 'primary';
+  return '<span class="tag ' + f.kind + (pri ? ' pri' : '') + '" data-f="' + f.id + '" title="' + esc(folderPath(f.id)) +
+    (pri ? ' (primary)' : ' (secondary)') + ' · click to open · right-click for options">' + esc(f.name || 'Untitled') +
+    (removable ? '<span class="x" data-x="' + f.id + '" title="Remove">×</span>' : '') + '</span>';
+}
+function sortedLinks(t) {
+  return liveLinks(t).slice().sort((a, b) => {
+    const ka = S.folders[a.folder].kind, kb = S.folders[b.folder].kind;
+    return (ka === kb ? 0 : ka === 'person' ? -1 : 1) || (a.role === b.role ? 0 : a.role === 'primary' ? -1 : 1);
+  });
+}
 function metaHTML(b, kidCount) {
   const parts = [];
+  for (const l of sortedLinks(b)) if (l.folder !== S.ui.folder) parts.push(tagHTML(l));
   if (b.start || b.end) {
     const r = b.start && b.end ? (b.start === b.end ? fmt(b.start) : fmt(b.start) + ' – ' + fmt(b.end)) : (b.start ? 'from ' + fmt(b.start) : 'by ' + fmt(b.end));
     parts.push('<span class="pill" title="Right-click to change dates">' + r + '</span>');
@@ -370,8 +565,9 @@ function nodeEl(b, idx) {
   const n = el('div', 'node'); n.dataset.id = b.id;
   const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : ''));
   const tw = el('span', 'tw');
-  if (kids.length) { tw.textContent = b.collapsed ? '▸' : '▾'; tw.classList.add('has'); tw.title = 'Collapse / expand (Ctrl+.)'; }
+  if (kids.length) { tw.textContent = b.collapsed ? '▸' : '▾'; tw.classList.add('has'); tw.title = 'Click: collapse / expand (Ctrl+.)'; }
   else tw.textContent = b.isSession ? '' : '•';
+  if (!b.isSession) { tw.draggable = true; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag: onto a person or project to link, or within the notes to move'; }
   row.appendChild(tw);
   if (b.isSession) {
     const d = el('span', 'sdate'); d.textContent = fmtLong(b.date); d.title = 'Click to change the date or delete this session'; row.appendChild(d);
@@ -397,6 +593,7 @@ function openItems(c) {
 
 function renderMain() {
   const ct = $('#content'); ct.innerHTML = '';
+  if (S.ui.folder && S.folders[S.ui.folder]) { renderFolder(ct, S.folders[S.ui.folder]); return; }
   const c = S.ui.current && S.containers[S.ui.current];
   if (!c) { ct.appendChild(welcome()); return; }
 
@@ -410,11 +607,35 @@ function renderMain() {
     const target = document.querySelector('.outline .row:not(.session) > .tx') || document.querySelector('.outline .tx');
     if (target) { target.focus(); setCaret(target, 'end'); }
   });
-  head.appendChild(title);
+  const trow = el('div', 'trow');
+  const grip = el('span', 'grip'); grip.textContent = '⠿'; grip.draggable = true;
+  grip.title = 'Drag onto a person or project to link this whole ' + (c.type === 'meeting' ? 'meeting' : 'document');
+  trow.append(grip, title); head.appendChild(trow);
 
   const sub = el('div', 'sub');
   const kind = el('span'); kind.textContent = (c.type === 'meeting' ? 'Meeting' : 'Document') + ' · created ' + fmt(c.created, { month: 'short', day: 'numeric', year: 'numeric' });
   sub.appendChild(kind);
+  { // project
+    const wrap = el('span'); wrap.append('Project: ');
+    const cur = containerProject(c), sel = el('select');
+    sel.innerHTML = '<option value="">none</option>' + flatFolders('project').map(([f, d]) => '<option value="' + f.id + '"' + (f.id === cur ? ' selected' : '') + '>' + '  '.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('');
+    sel.title = 'Bullets here with a person, dates, or a checkmark show up in this project automatically';
+    sel.onchange = () => { snap(); if (cur) removeLink(c, cur); if (sel.value) { addLink(c, sel.value); setRole(c, sel.value, 'primary'); } save(); renderAll(); };
+    wrap.appendChild(sel); sub.appendChild(wrap);
+  }
+  { // people
+    const wrap = el('span', 'chips'); wrap.append((c.type === 'meeting' ? 'Attendees' : 'People') + ': ');
+    const ppl = liveLinks(c).filter(l => S.folders[l.folder].kind === 'person');
+    const tags = el('span', 'chips'); tags.innerHTML = ppl.map(l => tagHTML({ folder: l.folder, role: 'secondary' }, true)).join(''); wrap.appendChild(tags);
+    const sel = el('select'); const have = new Set(ppl.map(l => l.folder));
+    sel.innerHTML = '<option value="">+ add</option>' + flatFolders('person').filter(([f]) => !have.has(f.id)).map(([f, d]) => '<option value="' + f.id + '">' + '  '.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('') + '<option value="__new">New person…</option>';
+    sel.onchange = () => {
+      if (sel.value === '__new') { const nm = prompt('Name'); if (!nm || !nm.trim()) { sel.value = ''; return; } snap(); const f = { id: uid(), kind: 'person', name: nm.trim(), parentId: null, order: 0, collapsed: false }; S.folders[f.id] = f; c.links.push({ folder: f.id, role: 'secondary' }); }
+      else if (sel.value) { snap(); c.links.push({ folder: sel.value, role: 'secondary' }); }
+      save(); renderAll();
+    };
+    wrap.appendChild(sel); sub.appendChild(wrap);
+  }
   if (c.type === 'meeting') {
     const others = Object.values(S.containers).filter(x => x.type === 'meeting' && x.id !== c.id).sort((a, b) => (a.title || '').localeCompare(b.title || ''));
     for (const [field, label] of [['prev', 'Precursor'], ['next', 'Successor']]) {
@@ -436,10 +657,10 @@ function renderMain() {
     const strip = el('div', 'strip');
     const h = el('div', 'h'); h.textContent = 'Open items'; strip.appendChild(h);
     const items = openItems(c);
-    if (!items.length) { const n = el('div', 'none'); n.textContent = 'None. Unchecked items with dates appear here (people links join them in stage 2).'; strip.appendChild(n); }
+    if (!items.length) { const n = el('div', 'none'); n.textContent = 'None. Unchecked items linked to a person or project, or with dates, appear here.'; strip.appendChild(n); }
     for (const b of items) {
       const r = el('div', 'oi');
-      const ck = el('input'); ck.type = 'checkbox'; ck.onchange = () => { snap(); b.done = true; b.doneAt = new Date().toISOString(); save(); renderMain(); };
+      const ck = el('input'); ck.type = 'checkbox'; ck.onchange = () => { snap(); b.done = true; b.doneAt = new Date().toISOString(); save(); renderSidebar(); renderMain(); };
       const t = el('span', 't'); t.textContent = b.text; t.onclick = () => reveal(b.id);
       const m = el('span', 'meta'); m.innerHTML = '<span>from ' + fmt(effDate(b)) + '</span>' + metaHTML(b, 0);
       r.append(ck, t, m); strip.appendChild(r);
@@ -455,10 +676,104 @@ function renderMain() {
   ct.appendChild(outline);
 }
 
+const viewOpen = {}; // which collapsible view sections are expanded (per session)
+function srcLabel(b) {
+  const c = S.containers[b.containerId];
+  if (!c) return '';
+  if (c.type === 'inbox') return (c.folderId === S.ui.folder ? 'Added here' : 'Added under ' + folderName(c.folderId)) + ' · ' + fmt(effDate(b), { month: 'short', day: 'numeric', year: 'numeric' });
+  return (c.title || 'Untitled') + ' · ' + fmtLong(effDate(b));
+}
+function goToSource(b) {
+  const c = S.containers[b.containerId]; if (!c) return;
+  if (c.type === 'inbox') { if (c.folderId !== S.ui.folder) openFolder(c.folderId); return; }
+  openContainer(c.id); reveal(b.id);
+}
+function renderFolder(ct, f) {
+  const head = el('div', 'head');
+  const title = el('input', 'title'); title.value = f.name || ''; title.placeholder = f.kind === 'person' ? 'Name' : 'Project name';
+  title.addEventListener('focus', () => snap());
+  title.addEventListener('input', () => { f.name = title.value; save(); renderSidebar(); });
+  title.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); const a = $('#addItem'); if (a) a.focus(); } });
+  head.appendChild(title);
+  const sub = el('div', 'sub');
+  const k = el('span'); k.textContent = (f.id === 'me' ? 'Person · your To-Do list' : f.kind === 'person' ? 'Person' : 'Project') + (f.parentId ? ' · in ' + folderPath(f.parentId) : '');
+  sub.appendChild(k);
+  const addSub = el('button', 'go'); addSub.textContent = '+ sub-folder'; addSub.title = 'Nest a ' + (f.kind === 'person' ? 'person' : 'project') + ' under this one'; addSub.onclick = () => newFolder(f.kind, f.id);
+  sub.appendChild(addSub);
+  if (f.id !== 'me') { const del = el('button', 'del'); del.textContent = 'Delete'; del.onclick = () => deleteFolder(f.id); sub.appendChild(del); }
+  head.appendChild(sub); ct.appendChild(head);
+
+  const add = el('input', 'additem'); add.id = 'addItem';
+  add.placeholder = '+ Add an item for ' + (f.id === 'me' ? 'yourself' : (f.name || 'this ' + f.kind)) + ', then press Enter';
+  add.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || !add.value.trim()) return;
+    e.preventDefault(); snap();
+    const ib = inboxFor(f.id);
+    const b = newBullet(ib.id, null, orderLast(null, ib.id), { text: add.value.trim() });
+    b.links = [{ folder: f.id, role: 'primary' }];
+    save(); renderAll(); const a2 = $('#addItem'); if (a2) a2.focus();
+  });
+  ct.appendChild(add);
+
+  const roots = folderMembers(f.id);
+  const byDate = (a, b) => (effDate(b.b) || '').localeCompare(effDate(a.b) || '') || (a.b.created || '').localeCompare(b.b.created || '') || a.b.order - b.b.order;
+  const open = roots.filter(r => !r.b.done);
+  const pri = open.filter(r => r.role === 'primary').sort(byDate);
+  const sec = open.filter(r => r.role !== 'primary').sort(byDate);
+  const done = roots.filter(r => r.b.done).sort((a, b) => (b.b.doneAt || '').localeCompare(a.b.doneAt || ''));
+  const D = folderDesc(f.id);
+  const linked = Object.values(S.containers).filter(c => c.type !== 'inbox' && liveLinks(c).some(l => D.has(l.folder)));
+  const idxCache = new Map(); const idxOf = cid => { if (!idxCache.has(cid)) idxCache.set(cid, kidsIndex(cid)); return idxCache.get(cid); };
+
+  function header(key, label, n, collapsible, defOpen) {
+    const isOpen = collapsible ? (viewOpen[f.id + key] !== undefined ? viewOpen[f.id + key] : defOpen) : true;
+    const h = el('div', 'vsec' + (collapsible ? ' tog' : ''));
+    h.textContent = (collapsible ? (isOpen ? '▾ ' : '▸ ') : '') + label + ' ';
+    const c = el('span', 'n'); c.textContent = '(' + n + ')'; h.appendChild(c);
+    if (collapsible) h.onclick = () => { viewOpen[f.id + key] = !isOpen; renderMain(); };
+    ct.appendChild(h);
+    return isOpen;
+  }
+  function items(list, dim) {
+    const g = el('div', 'outline vgroup' + (dim ? ' dim' : ''));
+    let lastSrc = null;
+    for (const r of list) {
+      const lab = srcLabel(r.b);
+      if (lab !== lastSrc) {
+        const s = el('div', 'src'); s.textContent = lab + (r.inherited ? ' · via project' : '');
+        s.title = 'Open where this was written'; s.onclick = () => goToSource(r.b); g.appendChild(s); lastSrc = lab;
+      }
+      const n = nodeEl(r.b, idxOf(r.b.containerId)); n.dataset.root = '1'; g.appendChild(n);
+    }
+    ct.appendChild(g);
+  }
+
+  header('open', f.id === 'me' ? 'To-Do' : 'Open', pri.length, false);
+  if (pri.length) items(pri, false);
+  else {
+    const e = el('div', 'vempty');
+    e.textContent = 'Nothing open. Drag a bullet from your notes onto ' + (f.name || 'this ' + f.kind) + ' in the sidebar, right-click a bullet to link it, or add an item above.';
+    ct.appendChild(e);
+  }
+  if (sec.length && header('sec', 'Also involves ' + (f.id === 'me' ? 'me' : (f.name || 'this')), sec.length, true, true)) items(sec, true);
+  if (header('mtg', 'Meetings & documents', linked.length, true, false)) {
+    const box = el('div', 'outline');
+    if (!linked.length) { const e = el('div', 'vempty'); e.textContent = f.kind === 'person' ? 'Add ' + (f.name || 'this person') + ' as an attendee on a meeting to list it here.' : 'Set a meeting\'s Project to list it here.'; box.appendChild(e); }
+    for (const c of linked.sort((a, b) => (b.created || '').localeCompare(a.created || ''))) {
+      const ds = sessionsOf(c.id).map(x => x.date).sort();
+      const r = el('div', 'vlink'); const t = el('span'); t.textContent = c.title || 'Untitled';
+      const d = el('span', 'd'); d.textContent = (c.type === 'meeting' ? 'Meeting' : 'Document') + (ds.length ? ' · last ' + fmt(ds[ds.length - 1]) : '');
+      r.append(t, d); r.onclick = () => openContainer(c.id); box.appendChild(r);
+    }
+    ct.appendChild(box);
+  }
+  if (header('done', 'Done', done.length, true, false) && done.length) items(done, false);
+}
+
 function welcome() {
   const w = el('div', 'welcome');
   w.innerHTML = '<h2>Pick a meeting or document, or start one.</h2>' +
-    '<p>Opening a meeting adds today\'s dated session at the top. Right-click a bullet to give it start and end dates.</p>' +
+    '<p>Opening a meeting adds today\'s dated session at the top. Drag a bullet\'s dot onto a person or project in the sidebar to link it; right-click a bullet for dates and links.</p>' +
     '<table>' + [
       ['Enter', 'New bullet (splits at the cursor)'], ['Tab / Shift+Tab', 'Indent / outdent'],
       ['Ctrl+Enter', 'Check / uncheck'], ['Ctrl+.', 'Collapse / expand'],
@@ -484,16 +799,24 @@ function reveal(id) {
 const content = $('#content');
 const bulletOf = node => S.bullets[node.closest('.node').dataset.id];
 
+let focusAtMouseDown = null;
 content.addEventListener('mousedown', e => {
-  if (e.target.classList.contains('tw')) e.preventDefault();
+  if (e.target.classList.contains('tw')) focusAtMouseDown = focusInfo(); // dots stay draggable, so remember the caret instead of blocking
   const a = e.target.closest('.tx a');
   if (a && document.activeElement !== a.closest('.tx')) e.preventDefault();
 });
 content.addEventListener('click', e => {
+  const x = e.target.closest('.tag .x');
+  if (x) { // remove an attendee/person chip from the open meeting or document
+    const c = S.containers[S.ui.current]; if (!c) return;
+    snap(); removeLink(c, x.dataset.x); save(); renderAll(); return;
+  }
+  const tg = e.target.closest('.tag');
+  if (tg) { openFolder(tg.dataset.f); return; }
   const a = e.target.closest('.tx a');
   if (a && document.activeElement !== a.closest('.tx')) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); return; }
   if (e.target.classList.contains('tw') && e.target.classList.contains('has')) {
-    const f = focusInfo(); const b = bulletOf(e.target);
+    const f = focusAtMouseDown; const b = bulletOf(e.target);
     b.collapsed = !b.collapsed; save(); renderMain(); refocus(f);
   }
 });
@@ -501,7 +824,7 @@ content.addEventListener('change', e => {
   if (!e.target.classList.contains('ck')) return;
   const b = bulletOf(e.target); snap();
   b.done = e.target.checked; b.doneAt = b.done ? new Date().toISOString() : null;
-  save(); renderMain();
+  save(); renderSidebar(); renderMain();
 });
 content.addEventListener('focusin', e => {
   const t = e.target; if (!t.classList || !t.classList.contains('tx')) return;
@@ -682,6 +1005,8 @@ content.addEventListener('keydown', e => {
   const t = e.target; if (!t.classList || !t.classList.contains('tx')) return;
   const b = bulletOf(t); const cid = b.containerId;
   const mod = e.ctrlKey || e.metaKey;
+  const isRoot = !!t.closest('.node').dataset.root; // a top item in a person/project view
+  const inheritLinks = nb => { if (isRoot && nb.parentId === b.parentId) nb.links = liveLinks(b).map(l => ({ folder: l.folder, role: l.role })); };
 
   if (e.key === 'Enter' && mod) {
     e.preventDefault(); if (b.isSession) return;
@@ -695,7 +1020,7 @@ content.addEventListener('keydown', e => {
     if (b.isSession) { b.collapsed = false; const nb = newBullet(cid, b.id, orderFirst(b.id, cid)); commit(nb.id, 0); return; }
     if (pos === 0 && text.length > 0) {
       const s = siblings(b), p = s[s.indexOf(b) - 1];
-      newBullet(cid, b.parentId, p ? (p.order + b.order) / 2 : b.order - 1);
+      inheritLinks(newBullet(cid, b.parentId, p ? (p.order + b.order) / 2 : b.order - 1));
       commit(b.id, 0); return;
     }
     b.text = text.slice(0, pos);
@@ -704,11 +1029,19 @@ content.addEventListener('keydown', e => {
     const nb = (kids.length && !b.collapsed)
       ? newBullet(cid, b.id, orderFirst(b.id, cid), { text: after })
       : newBullet(cid, b.parentId, orderAfter(b), { text: after });
+    inheritLinks(nb);
     commit(nb.id, 0); return;
   }
   if (e.key === 'Backspace' && !mod) {
     const sel = getSelection();
     if (!sel.isCollapsed || getCaret(t) !== 0 || b.isSession) return;
+    if (isRoot) { // never merge across items from different notes
+      if (t.textContent || childList(b.id, cid).length) return;
+      e.preventDefault(); snap();
+      const list = [...content.querySelectorAll('.outline .tx')]; const pv = list[list.indexOf(t) - 1];
+      deleteTree(b.id); save(); renderMain(); if (pv) { const id = pv.closest('.node').dataset.id; refocus({ id, pos: 'end' }); }
+      return;
+    }
     const list = [...content.querySelectorAll('.outline .tx')];
     const prevTx = list[list.indexOf(t) - 1];
     const hasKids = childList(b.id, cid).length > 0;
@@ -720,7 +1053,7 @@ content.addEventListener('keydown', e => {
     const at = prev.text.length; prev.text += t.textContent; deleteTree(b.id); commit(prev.id, at); return;
   }
   if (e.key === 'Tab') {
-    e.preventDefault(); if (b.isSession) return;
+    e.preventDefault(); if (b.isSession || isRoot) return;
     const pos = getCaret(t);
     if (e.shiftKey) {
       if (!b.parentId) return;
@@ -733,7 +1066,7 @@ content.addEventListener('keydown', e => {
     commit(b.id, pos); return;
   }
   if (mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-    e.preventDefault(); if (b.isSession) return;
+    e.preventDefault(); if (b.isSession || isRoot) return;
     const s = siblings(b), i = s.indexOf(b), o = s[e.key === 'ArrowUp' ? i - 1 : i + 1];
     if (!o || o.isSession) return;
     snap(); const tmp = b.order; b.order = o.order; o.order = tmp;
@@ -792,7 +1125,32 @@ content.addEventListener('click', e => {
   if (!e.target.classList.contains('sdate')) return;
   sessionPop(bulletOf(e.target), e.clientX, e.clientY);
 });
+function folderOptions(exclude) {
+  return ['person', 'project'].map(k => '<optgroup label="' + KIND_LABEL[k] + '">' +
+    flatFolders(k).filter(([f]) => !exclude.has(f.id)).map(([f, d]) => '<option value="' + f.id + '">' + '\u00a0\u00a0'.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('') + '</optgroup>').join('');
+}
+function tagPop(target, fid, x, y, isBullet) {
+  popFor = isBullet ? target : null;
+  const l = liveLinks(target).find(k => k.folder === fid); if (!l) return;
+  pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">' + esc(folderPath(fid)) + '</div><div class="menu">' +
+    (isBullet ? (l.role === 'primary' ? '<button id="tSec">Make secondary</button>' : '<button id="tPri">Make primary</button>') : '') +
+    '<button id="tOpen">Open ' + esc(folderName(fid)) + '</button><button id="tDel">Remove link</button></div>';
+  placePop(x, y);
+  const done = () => { save(); closePop(); renderAll(); };
+  if ($('#tSec')) $('#tSec').onclick = () => { snap(); setRole(target, fid, 'secondary'); done(); };
+  if ($('#tPri')) $('#tPri').onclick = () => { snap(); setRole(target, fid, 'primary'); done(); };
+  $('#tOpen').onclick = () => { popFor = null; closePop(); openFolder(fid); };
+  $('#tDel').onclick = () => { snap(); removeLink(target, fid); done(); };
+}
 content.addEventListener('contextmenu', e => {
+  const tg = e.target.closest('.tag');
+  if (tg) {
+    e.preventDefault();
+    const node = tg.closest('.node');
+    if (node) tagPop(S.bullets[node.dataset.id], tg.dataset.f, e.clientX, e.clientY, true);
+    else if (S.containers[S.ui.current]) tagPop(S.containers[S.ui.current], tg.dataset.f, e.clientX, e.clientY, false);
+    return;
+  }
   const row = e.target.closest('.row'); if (!row) return;
   if (row.classList.contains('session')) { e.preventDefault(); sessionPop(bulletOf(row), e.clientX, e.clientY); return; }
   e.preventDefault();
@@ -802,11 +1160,10 @@ content.addEventListener('contextmenu', e => {
     '<label>Start <input type="date" id="pStart" value="' + (b.start || '') + '"></label>' +
     '<label>End <input type="date" id="pEnd" value="' + (b.end || '') + '"></label>' +
     '<div style="color:var(--muted);font-size:12px">Session date: ' + (effDate(b) ? fmtLong(effDate(b)) : 'none') + '</div>' +
-    '<div class="btns"><button id="pClear">Clear</button><button id="pDone" class="primary">Done</button></div>';
-  pop.style.display = 'block';
-  const w = pop.offsetWidth, h = pop.offsetHeight;
-  pop.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px';
-  pop.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px';
+    '<div style="font-weight:600;margin:10px 0 4px">Links</div>' +
+    '<label>Link to <select id="pLink"><option value="">choose…</option>' + folderOptions(new Set(liveLinks(b).map(l => l.folder))) + '</select></label>' +
+    '<div class="btns"><button id="pClear">Clear dates</button><button id="pDone" class="primary">Done</button></div>';
+  placePop(e.clientX, e.clientY);
   let snapped = false;
   const apply = () => {
     if (!snapped) { snap(); snapped = true; }
@@ -815,9 +1172,9 @@ content.addEventListener('contextmenu', e => {
     b.start = s; b.end = en; save(); renderMain();
   };
   $('#pStart').onchange = apply; $('#pEnd').onchange = apply;
+  $('#pLink').onchange = () => { const v = $('#pLink').value; if (!v) return; snap(); addLink(b, v); save(); closePop(); renderAll(); };
   $('#pClear').onclick = () => { $('#pStart').value = ''; $('#pEnd').value = ''; apply(); closePop(); };
   $('#pDone').onclick = closePop;
-  $('#pStart').focus();
 });
 function closePop() { pop.style.display = 'none'; const id = popFor && popFor.id; popFor = null; if (id) refocus({ id, pos: 'end' }); }
 document.addEventListener('mousedown', e => { if (pop.style.display === 'block' && !pop.contains(e.target)) closePop(); });
@@ -829,6 +1186,106 @@ document.addEventListener('keydown', e => {
   else if (mod && !inField && (e.key === 'y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) { e.preventDefault(); redo(); }
 }, true);
 
+/* ---------- drag and drop ---------- */
+let drag = null, dropAt = null;
+function clearDropMarks() { document.querySelectorAll('.drop,.drop-before,.drop-after,.drop-child').forEach(n => n.classList.remove('drop', 'drop-before', 'drop-after', 'drop-child')); }
+function isDesc(t, ancestorId) { let x = t; while (x) { if (x.id === ancestorId) return true; x = x.parentId ? S.bullets[x.parentId] : null; } return false; }
+function setContainerDeep(b, cid) { b.containerId = cid; for (const k of Object.values(S.bullets)) if (k.parentId === b.id) setContainerDeep(k, cid); }
+function flashFolder(fid) { const it = document.querySelector('.item.folder[data-fid="' + fid + '"]'); if (it) it.classList.add('flash'); }
+document.addEventListener('dragstart', e => {
+  const t = e.target.nodeType === 1 ? e.target : e.target.parentElement;
+  const tw = t.closest('.tw[draggable="true"]'), grip = t.closest('.grip'), fi = t.closest('.item.folder');
+  if (tw) {
+    const b = bulletOf(tw); drag = { type: 'bullet', id: b.id };
+    e.dataTransfer.setData('text/plain', b.text || ''); e.dataTransfer.effectAllowed = 'all';
+    try { e.dataTransfer.setDragImage(tw.closest('.row'), 12, 11); } catch (_) {}
+  } else if (grip && S.ui.current) {
+    drag = { type: 'container', id: S.ui.current }; e.dataTransfer.setData('text/plain', S.containers[S.ui.current].title || ''); e.dataTransfer.effectAllowed = 'all';
+  } else if (fi) {
+    drag = { type: 'folder', id: fi.dataset.fid }; e.dataTransfer.setData('text/plain', folderName(fi.dataset.fid)); e.dataTransfer.effectAllowed = 'move';
+  } else drag = null;
+});
+document.addEventListener('dragend', () => { drag = null; dropAt = null; clearDropMarks(); });
+function canDropOnFolder(fid) {
+  if (!drag) return false;
+  if (drag.type === 'folder') { const a = S.folders[drag.id], b = S.folders[fid]; return a && b && a.kind === b.kind && !folderDesc(drag.id).has(fid); }
+  return true;
+}
+const lists = $('#lists');
+lists.addEventListener('dragover', e => {
+  if (!drag) return;
+  clearDropMarks();
+  const fi = e.target.closest('.item.folder'), hdr = e.target.closest('.fsec');
+  if (fi && canDropOnFolder(fi.dataset.fid)) { e.preventDefault(); e.dataTransfer.dropEffect = drag.type === 'folder' ? 'move' : 'link'; fi.classList.add('drop'); }
+  else if (hdr && drag.type === 'folder' && S.folders[drag.id] && S.folders[drag.id].kind === hdr.dataset.kind) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; hdr.classList.add('drop'); }
+});
+lists.addEventListener('dragleave', e => { if (!lists.contains(e.relatedTarget)) clearDropMarks(); });
+lists.addEventListener('drop', e => {
+  if (!drag) return;
+  e.preventDefault(); clearDropMarks();
+  const fi = e.target.closest('.item.folder'), hdr = e.target.closest('.fsec');
+  const f = focusInfo();
+  if (fi && canDropOnFolder(fi.dataset.fid)) {
+    const fid = fi.dataset.fid;
+    if (drag.type === 'bullet') { const b = S.bullets[drag.id]; if (!b) return; snap(); if (!addLink(b, fid)) setStatus(folderName(fid) + ' is already linked'); }
+    else if (drag.type === 'container') { const c = S.containers[drag.id]; snap(); if (!addLink(c, fid)) setStatus(folderName(fid) + ' is already linked'); }
+    else if (drag.type === 'folder') { snap(); S.folders[drag.id].parentId = fid; S.folders[fid].collapsed = false; }
+    save(); renderAll(); refocus(f); flashFolder(fid);
+  } else if (hdr && drag.type === 'folder') { snap(); S.folders[drag.id].parentId = null; save(); renderAll(); refocus(f); }
+  drag = null;
+});
+function dropZone(row, t, e) {
+  if (t.isSession) return 'child';
+  const r = row.getBoundingClientRect(), lower = e.clientY > r.top + r.height / 2;
+  const tx = row.querySelector('.tx').getBoundingClientRect();
+  if (lower && e.clientX > tx.left + 40) return 'child';
+  return lower ? 'after' : 'before';
+}
+content.addEventListener('dragover', e => {
+  if (!drag) return;
+  e.preventDefault(); // never let the browser drop text into a note
+  clearDropMarks(); dropAt = null; e.dataTransfer.dropEffect = 'none';
+  if (drag.type !== 'bullet') return;
+  const row = e.target.closest('.outline .row'); if (!row) return;
+  const t = bulletOf(row), b = S.bullets[drag.id];
+  if (!t || !b || isDesc(t, b.id)) return;
+  const zone = dropZone(row, t, e);
+  row.classList.add('drop-' + zone); dropAt = { t: t.id, zone }; e.dataTransfer.dropEffect = 'move';
+});
+content.addEventListener('drop', e => {
+  if (!drag) return;
+  e.preventDefault(); clearDropMarks();
+  if (drag.type !== 'bullet' || !dropAt) { drag = null; return; }
+  const b = S.bullets[drag.id], t = S.bullets[dropAt.t]; drag = null; if (!b || !t) return;
+  snap();
+  const cid = t.containerId;
+  if (dropAt.zone === 'child') { b.parentId = t.id; b.order = orderFirst(t.id, cid); t.collapsed = false; }
+  else {
+    const sib = childList(t.parentId, cid).filter(x => x.id !== b.id), i = sib.indexOf(t);
+    const nb = dropAt.zone === 'before' ? sib[i - 1] : sib[i + 1];
+    b.parentId = t.parentId;
+    b.order = dropAt.zone === 'before' ? (nb ? (nb.order + t.order) / 2 : t.order - 1) : (nb ? (nb.order + t.order) / 2 : t.order + 1);
+  }
+  if (b.containerId !== cid) setContainerDeep(b, cid);
+  dropAt = null;
+  commit(b.id, 'end');
+});
+lists.addEventListener('contextmenu', e => {
+  const fi = e.target.closest('.item.folder'); if (!fi) return;
+  e.preventDefault();
+  const f = S.folders[fi.dataset.fid]; popFor = null;
+  pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">' + esc(folderPath(f.id)) + '</div><div class="menu">' +
+    '<button id="fOpen">Open</button><button id="fRen">Rename</button><button id="fSub">New sub-folder</button>' +
+    (f.parentId ? '<button id="fTop">Move to top level</button>' : '') +
+    (f.id !== 'me' ? '<button id="fDel">Delete…</button>' : '') + '</div>';
+  placePop(e.clientX, e.clientY);
+  $('#fOpen').onclick = () => { closePop(); openFolder(f.id); };
+  $('#fRen').onclick = () => { closePop(); openFolder(f.id, true); const t = $('.head .title'); if (t) t.select(); };
+  $('#fSub').onclick = () => { closePop(); newFolder(f.kind, f.id); };
+  if ($('#fTop')) $('#fTop').onclick = () => { snap(); f.parentId = null; save(); closePop(); renderAll(); };
+  if ($('#fDel')) $('#fDel').onclick = () => { closePop(); deleteFolder(f.id); };
+});
+
 /* ---------- sidebar & footer ---------- */
 $('#newMeeting').onclick = () => createContainer('meeting');
 $('#newDoc').onclick = () => createContainer('document');
@@ -836,7 +1293,7 @@ $('#filter').addEventListener('input', renderSidebar);
 $('#themeBtn').onclick = () => { const order = [null, 'light', 'dark']; S.ui.theme = order[(order.indexOf(S.ui.theme || null) + 1) % 3]; save(); applyTheme(); };
 
 function exportData() {
-  const data = JSON.stringify({ app: 'ecco-pim', version: 1, exportedAt: new Date().toISOString(), containers: S.containers, bullets: S.bullets }, null, 1);
+  const data = JSON.stringify({ app: 'ecco-pim', version: 2, exportedAt: new Date().toISOString(), containers: S.containers, bullets: S.bullets, folders: S.folders }, null, 1);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
   a.download = 'pim-backup-' + todayISO() + '.json';
@@ -853,9 +1310,9 @@ $('#importFile').onchange = e => {
     try {
       const o = JSON.parse(r.result);
       if (!o || typeof o.containers !== 'object' || typeof o.bullets !== 'object') throw new Error('Not a backup file');
-      const n = Object.keys(o.containers).length, m = Object.keys(o.bullets).length;
-      if (!confirm('Replace everything here with this backup (' + n + ' meetings/documents, ' + m + ' bullets)?\n(Ctrl+Z undoes this.)')) return;
-      snap(); S.containers = o.containers; S.bullets = o.bullets; S.ui.current = null; save(); renderAll();
+      const n = Object.values(o.containers).filter(c => c.type !== 'inbox').length, m = Object.keys(o.bullets).length, k = o.folders ? Object.keys(o.folders).length : 0;
+      if (!confirm('Replace everything here with this backup (' + n + ' meetings/documents, ' + m + ' bullets, ' + k + ' people/projects)?\n(Ctrl+Z undoes this.)')) return;
+      snap(); S.containers = o.containers; S.bullets = o.bullets; S.folders = o.folders || {}; ensureModel(); S.ui.current = null; S.ui.folder = null; save(); renderAll();
     } catch (err) { alert('Could not import: ' + err.message); }
     e.target.value = '';
   };
@@ -869,7 +1326,8 @@ $('#importFile').onchange = e => {
     for (const s of sessionsOf(c.id)) if (!(c.id === S.ui.current && s.date === todayISO()) && treeEmpty(s.id)) deleteTree(s.id);
   }
 })();
-if (S.ui.current && S.containers[S.ui.current]) openContainer(S.ui.current); else { S.ui.current = null; renderAll(); }
+if (S.ui.current && S.containers[S.ui.current]) openContainer(S.ui.current);
+else { S.ui.current = null; if (S.ui.folder && !S.folders[S.ui.folder]) S.ui.folder = null; renderAll(); }
 setStatus('Saved in this browser');
 })();
 </script>
