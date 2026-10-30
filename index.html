@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ecco PIM</title>
+<script src="https://accounts.google.com/gsi/client" async></script>
 <style>
 :root{
   --bg:#fbfbfa; --panel:#f3f2ef; --text:#1d1d1b; --muted:#85837d; --faint:#b9b6af;
@@ -66,6 +67,11 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 #side .foot{border-top:1px solid var(--line);padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px}
 #status{color:var(--muted);flex:1 0 100%}
 #status.err{color:#d33}
+#side .foot button[hidden]{display:none}
+#pop .conf{max-height:50vh;overflow:auto;max-width:420px}
+#pop .ci{border-top:1px solid var(--line);padding:6px 0;white-space:pre-wrap;word-break:break-word}
+#pop .ci .cm{font-size:11.5px;color:var(--muted)}
+#pop .ci .btns{margin-top:4px}
 
 /* Main */
 #main{flex:1;height:100%;overflow:auto;display:flex;flex-direction:column}
@@ -170,6 +176,8 @@ body.sweeping,body.sweeping *{-webkit-user-select:none!important;user-select:non
     <button id="importBtn" title="Restore from a backup file">Import</button>
     <button id="themeBtn" title="Theme">Theme: system</button>
     <span id="status">Saved</span>
+    <button id="syncBtn" hidden></button>
+    <button id="confBtn" hidden title="Edits that a newer edit replaced; restore or dismiss them"></button>
     <input type="file" id="importFile" accept=".json,application/json" hidden>
   </div>
 </aside>
@@ -199,6 +207,13 @@ const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.cla
 const $ = s => document.querySelector(s);
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+function hash(str) { // cyrb53: short fingerprint of a record, to notice what changed
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) { const ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
 
 /* ---------- state ---------- */
 function blank() { return { version: 2, containers: {}, bullets: {}, folders: {}, ui: { current: null, folder: null, lastExport: null, theme: null } }; }
@@ -209,7 +224,8 @@ function load() {
   } catch (e) { /* storage unavailable */ }
   return null;
 }
-let S = load() || blank();
+const LOADED = load();
+let S = LOADED || blank();
 function ensureModel() {
   if (!S.folders) S.folders = {};
   if (!S.folders.me) S.folders.me = { id: 'me', kind: 'person', name: 'Me', parentId: null, order: -1, collapsed: false };
@@ -226,11 +242,13 @@ function save() {
   setStatus('Saving…');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    try { localStorage.setItem(KEY, JSON.stringify(S)); setStatus('Saved in this browser'); }
-    catch (e) { setStatus('Save failed. Export a backup now.', true); }
+    try { localStorage.setItem(KEY, JSON.stringify(S)); }
+    catch (e) { setStatus('Save failed. Export a backup now.', true); return; }
+    if (stamp()) scheduleSync(3000);
+    showSync();
   }, 250);
 }
-window.addEventListener('beforeunload', () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} });
+window.addEventListener('beforeunload', () => { try { localStorage.setItem(KEY, JSON.stringify(S)); stamp(); } catch (e) {} });
 
 /* ---------- undo / redo ---------- */
 let undoStack = [], redoStack = [], typingSnap = false, typingTimer = null;
@@ -254,6 +272,195 @@ function toast(msg, canUndo) {
   clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, 8000);
 }
 function hideToast() { const t = $('#toast'); if (t) t.style.display = 'none'; }
+
+/* ---------- sync: Google Drive app folder ----------
+   Each browser writes only its own file (eccopim-dev-<device>.json) holding every record with its
+   last-modified time; it reads the other browsers' files and keeps the newer version of each record.
+   No browser ever overwrites another's file, so two laptops can't erase each other's edits. When the
+   same record changed in both places since they last agreed, the newer edit wins and the other text
+   goes to the Conflicts list. Deletions travel as tombstones. */
+const CLIENT_ID = '893079433077-hnqv9138rg6ioje7r7qiicu5e0sf5it5.apps.googleusercontent.com';
+const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+const META_KEY = 'eccopim.meta', SYNC_KEY = 'eccopim.sync', DEV_KEY = 'eccopim.device', CONF_KEY = 'eccopim.conflicts', TOKEN_KEY = 'eccopim.token';
+const COLL = { b: 'bullets', c: 'containers', f: 'folders' };
+function lsGet(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+let M = lsGet(META_KEY, null), SY = lsGet(SYNC_KEY, null), CONF = lsGet(CONF_KEY, []), DEV = lsGet(DEV_KEY, null);
+if (!M || !SY || !DEV || !LOADED) {
+  // New or reset browser: what's here counts as older than Drive, and the browser gets a fresh identity,
+  // so a file it wrote before a reset is read back like another laptop's instead of being overwritten.
+  DEV = uid(); M = {};
+  for (const [p, coll] of Object.entries(COLL)) for (const [id, v] of Object.entries(S[coll])) M[p + ':' + id] = { mt: 1, h: hash(JSON.stringify(v)) };
+  SY = { base: {}, seen: {}, fileId: null, last: null, connected: !!(SY && SY.connected) };
+  lsSet(DEV_KEY, DEV); lsSet(META_KEY, M); lsSet(SYNC_KEY, SY);
+}
+const saveSY = () => lsSet(SYNC_KEY, SY);
+
+// Give every record that changed since the last call a new modified time; deleted ones become tombstones.
+function stamp() {
+  const now = Date.now(), live = new Set(); let n = 0;
+  for (const [p, coll] of Object.entries(COLL)) for (const [id, v] of Object.entries(S[coll])) {
+    const k = p + ':' + id, h = hash(JSON.stringify(v)), m = M[k]; live.add(k);
+    if (!m || m.del || m.h !== h) { M[k] = { mt: now, dev: DEV, h }; n++; }
+  }
+  for (const k of Object.keys(M)) if (!live.has(k) && !M[k].del) { M[k] = { mt: now, dev: DEV, del: true }; n++; }
+  if (n) lsSet(META_KEY, M);
+  return n;
+}
+const dirtyKeys = () => Object.keys(M).filter(k => M[k].mt > (SY.base[k] || 0));
+
+let token = null, tokenExp = 0, tokenClient = null;
+try { const t = JSON.parse(sessionStorage.getItem(TOKEN_KEY)); if (t && t.exp > Date.now() + 60000) { token = t.token; tokenExp = t.exp; } } catch (e) {}
+function dropToken() { token = null; tokenExp = 0; try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+let syncState = token ? 'ok' : (SY.connected ? 'auth' : 'off'), syncErr = '', syncing = false, syncAgain = false, syncTimer = null;
+
+function connect() {
+  const g = window.google && google.accounts && google.accounts.oauth2;
+  if (!g) { syncState = 'error'; syncErr = 'Google sign-in did not load. Check the connection and reload'; showSync(); return; }
+  if (!tokenClient) tokenClient = g.initTokenClient({
+    client_id: CLIENT_ID, scope: SCOPE,
+    callback: r => {
+      if (!r || r.error || !r.access_token) { syncState = SY.connected ? 'auth' : 'off'; showSync(); return; }
+      token = r.access_token; tokenExp = Date.now() + (Number(r.expires_in) || 3600) * 1000;
+      try { sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ token, exp: tokenExp })); } catch (e) {}
+      SY.connected = true; saveSY(); syncNow();
+    },
+    error_callback: () => { syncState = SY.connected ? 'auth' : 'off'; showSync(); }
+  });
+  tokenClient.requestAccessToken({ prompt: '' });
+}
+
+// Storage layer. Anything with list/read/write like this can replace Google Drive later.
+const API = 'https://www.googleapis.com/drive/v3/files', UP = 'https://www.googleapis.com/upload/drive/v3/files';
+async function gfetch(url, opt) {
+  opt = opt || {}; opt.headers = Object.assign({ Authorization: 'Bearer ' + token }, opt.headers || {});
+  const r = await fetch(url, opt);
+  if (r.status === 401) { dropToken(); const e = new Error('Signed out'); e.auth = true; throw e; }
+  if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); m = (j.error && j.error.message) || m; } catch (_) {} const e = new Error(m); e.status = r.status; throw e; }
+  return r;
+}
+const DriveStore = {
+  async list() {
+    const q = encodeURIComponent("name contains 'eccopim-dev-' and trashed = false");
+    const r = await gfetch(API + '?spaces=appDataFolder&pageSize=100&fields=files(id,name,modifiedTime)&q=' + q);
+    return (await r.json()).files || [];
+  },
+  async read(id) { const r = await gfetch(API + '/' + encodeURIComponent(id) + '?alt=media'); return r.json(); },
+  async write(id, name, data) {
+    const body = JSON.stringify(data);
+    if (id) {
+      const r = await gfetch(UP + '/' + encodeURIComponent(id) + '?uploadType=media&fields=id,modifiedTime', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body });
+      return r.json();
+    }
+    const b = 'eccopim' + uid();
+    const mp = '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify({ name, parents: ['appDataFolder'] }) +
+      '\r\n--' + b + '\r\nContent-Type: application/json\r\n\r\n' + body + '\r\n--' + b + '--';
+    const r = await gfetch(UP + '?uploadType=multipart&fields=id,modifiedTime', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b }, body: mp });
+    return r.json();
+  }
+};
+const store = DriveStore;
+
+function scheduleSync(ms) { if (!token) return; clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, ms); }
+async function syncNow() {
+  clearTimeout(syncTimer);
+  if (token && Date.now() > tokenExp - 30000) dropToken();
+  if (!token) { syncState = SY.connected ? 'auth' : 'off'; showSync(); return; }
+  if (!navigator.onLine) { syncState = 'offline'; showSync(); return; }
+  if (syncing) { syncAgain = true; return; }
+  syncing = true; syncState = 'busy'; showSync();
+  try {
+    const mine = 'eccopim-dev-' + DEV + '.json';
+    const files = await store.list();
+    let applied = 0;
+    for (const f of files) {
+      if (f.name === mine) { SY.fileId = f.id; continue; }
+      if (SY.seen[f.id] === f.modifiedTime) continue;
+      const data = await store.read(f.id);
+      applied += mergeRemote((data && data.records) || {});
+      SY.seen[f.id] = f.modifiedTime; saveSY();
+    }
+    if (applied) afterRemote();
+    stamp();
+    const dirty = dirtyKeys();
+    if (dirty.length || !SY.fileId) {
+      const rec = {}, sent = {};
+      for (const k in M) {
+        const m = M[k];
+        if (m.del) rec[k] = { mt: m.mt, dev: m.dev, del: true };
+        else { const v = S[COLL[k[0]]][k.slice(2)]; if (v) rec[k] = { mt: m.mt, dev: m.dev, v }; }
+      }
+      for (const k of dirty) sent[k] = M[k].mt;
+      const data = { app: 'ecco-pim', format: 3, device: DEV, savedAt: new Date().toISOString(), records: rec };
+      let res;
+      try { res = await store.write(SY.fileId, mine, data); }
+      catch (e) { if (e.status === 404 && SY.fileId) { SY.fileId = null; res = await store.write(null, mine, data); } else throw e; }
+      SY.fileId = res.id;
+      for (const k in sent) if ((SY.base[k] || 0) < sent[k]) SY.base[k] = sent[k];
+    }
+    SY.last = Date.now(); saveSY(); syncState = 'ok'; syncErr = '';
+  } catch (e) {
+    if (e.auth) syncState = 'auth';
+    else if (!navigator.onLine || e instanceof TypeError) syncState = 'offline';
+    else { syncState = 'error'; syncErr = e.message || String(e); }
+  }
+  syncing = false; showSync();
+  if (syncAgain || (syncState === 'ok' && dirtyKeys().length)) { syncAgain = false; scheduleSync(1000); }
+}
+function mergeRemote(recs) {
+  stamp(); // capture any edit made while the download was in flight before comparing
+  let n = 0;
+  for (const k in recs) {
+    const r = recs[k], coll = COLL[k[0]];
+    if (!coll || !r || typeof r.mt !== 'number' || (!r.del && (!r.v || typeof r.v !== 'object'))) continue;
+    const id = k.slice(2), m = M[k], base = SY.base[k] || 0;
+    if (m && r.mt === m.mt) continue;
+    const rh = r.del ? null : hash(JSON.stringify(r.v));
+    const same = m ? (m.del ? !!r.del : (!r.del && m.h === rh)) : !!r.del;
+    if (m && r.mt < m.mt) { // ours is newer: keep it; if theirs also changed since we last agreed, keep their text
+      if (!same && r.mt > base && !r.del) addConflict(k, r.v, r.mt, 'other', S[coll][id]);
+      continue;
+    }
+    if (m && !same && !m.del && m.mt > base) addConflict(k, S[coll][id], m.mt, 'this', r.del ? null : r.v); // ours changed too but is older
+    if (r.del) delete S[coll][id]; else S[coll][id] = r.v;
+    M[k] = r.del ? { mt: r.mt, dev: r.dev, del: true } : { mt: r.mt, dev: r.dev, h: rh };
+    SY.base[k] = r.mt;
+    if (!same) n++;
+  }
+  lsSet(META_KEY, M); saveSY();
+  return n;
+}
+function afterRemote() {
+  ensureModel();
+  if (S.ui.current && !S.containers[S.ui.current]) S.ui.current = null;
+  if (S.ui.folder && !S.folders[S.ui.folder]) S.ui.folder = null;
+  for (const id of [...bsel]) if (!S.bullets[id]) bsel.delete(id);
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+  if (pop.style.display === 'block') closePop();
+  const f = focusInfo(); renderAll(); refocus(f);
+}
+function addConflict(k, v, mt, side, winner) { // keep the losing bullet text, only when the words differ
+  if (k[0] !== 'b' || !v || !(v.text || '').trim()) return;
+  if (winner && winner.text === v.text) return;
+  CONF.unshift({ k, text: v.text, mt, side, at: Date.now() });
+  if (CONF.length > 200) CONF.length = 200;
+  lsSet(CONF_KEY, CONF);
+}
+function showSync() {
+  const n = dirtyKeys().length, w = n ? ' · ' + plural(n, 'change') + ' not yet in Drive' : '';
+  let msg, err = false, btn = null;
+  switch (syncState) {
+    case 'off': msg = 'Saved in this browser only'; btn = 'Connect Google Drive'; break;
+    case 'auth': msg = 'Drive disconnected' + w; btn = 'Reconnect'; break;
+    case 'offline': msg = 'Offline' + w + '. Saved in this browser'; break;
+    case 'busy': msg = 'Syncing…'; break;
+    case 'error': msg = 'Sync error: ' + syncErr + w; err = true; btn = 'Retry'; break;
+    default: msg = n ? 'Saving to Drive…' : 'Synced with Drive' + (SY.last ? ' ' + new Date(SY.last).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+  }
+  setStatus(msg, err);
+  const b = $('#syncBtn'); b.hidden = !btn; if (btn) b.textContent = btn;
+  const c = $('#confBtn'); c.hidden = !CONF.length; c.textContent = 'Conflicts (' + CONF.length + ')';
+}
 
 /* ---------- model helpers ---------- */
 function kidsIndex(cid) {
@@ -565,11 +772,11 @@ function renderBanner() {
   const b = $('#banner');
   const last = S.ui.lastExport ? new Date(S.ui.lastExport) : null;
   const days = last ? (Date.now() - last.getTime()) / 864e5 : Infinity;
-  const hasData = Object.keys(S.bullets).length > 0;
-  if (hasData && days > 7) {
+  const hasData = Object.keys(S.bullets).length > 0, synced = !!(SY.connected && SY.last);
+  if (hasData && days > (synced ? 30 : 7)) {
     b.hidden = false;
     b.innerHTML = '';
-    const s = el('span'); s.textContent = 'Notes are stored only in this browser until sync arrives (stage 3). ' + (last ? 'Last backup: ' + fmt(isoOf(last)) + '.' : 'No backup yet.');
+    const s = el('span'); s.textContent = (synced ? 'Monthly backup: keep a copy that doesn\'t depend on Google. ' : 'Notes are stored only in this browser until you connect Google Drive (bottom left). ') + (last ? 'Last backup: ' + fmt(isoOf(last)) + '.' : 'No backup yet.');
     const btn = el('button'); btn.textContent = 'Export backup'; btn.onclick = exportData;
     b.append(s, btn);
   } else b.hidden = true;
@@ -1359,6 +1566,25 @@ content.addEventListener('contextmenu', e => {
   $('#pClear').onclick = () => { $('#pStart').value = ''; $('#pEnd').value = ''; apply(); closePop(); };
   $('#pDone').onclick = closePop;
 });
+function conflictsPop() {
+  popFor = null;
+  if (!CONF.length) { closePop(); showSync(); return; }
+  pop.innerHTML = '<div style="font-weight:600;margin-bottom:2px">Replaced by a newer edit</div>' +
+    '<div style="color:var(--muted);font-size:12px;margin-bottom:4px">The same item was changed in two places. The newer edit won; the other version is kept here.</div><div class="conf">' +
+    CONF.map((c, i) => {
+      const canRestore = c.k[0] === 'b' && S.bullets[c.k.slice(2)];
+      return '<div class="ci"><div class="cm">' + esc(new Date(c.mt).toLocaleString()) + (c.side === 'this' ? ' · this browser' : ' · another laptop') + (canRestore ? '' : ' · item since deleted') + '</div>' +
+        '<div>' + esc(c.text) + '</div><div class="btns">' + (canRestore ? '<button data-cr="' + i + '">Restore this text</button>' : '') + '<button data-cd="' + i + '">Dismiss</button></div></div>';
+    }).join('') + '</div>';
+  placePop(262, innerHeight);
+}
+pop.addEventListener('click', e => {
+  const r = e.target.dataset && e.target.dataset.cr, d = e.target.dataset && e.target.dataset.cd;
+  if (r === undefined && d === undefined) return;
+  const i = Number(r !== undefined ? r : d), c = CONF[i]; if (!c) return;
+  if (r !== undefined) { const b = S.bullets[c.k.slice(2)]; if (b) { snap(); b.text = c.text; save(); renderAll(); } }
+  CONF.splice(i, 1); lsSet(CONF_KEY, CONF); showSync(); conflictsPop();
+});
 function closePop() { pop.style.display = 'none'; const id = popFor && popFor.id; popFor = null; if (id) refocus({ id, pos: 'end' }); }
 document.addEventListener('mousedown', e => { if (pop.style.display === 'block' && !pop.contains(e.target)) closePop(); });
 document.addEventListener('keydown', e => {
@@ -1510,7 +1736,7 @@ $('#importFile').onchange = e => {
       const o = JSON.parse(r.result);
       if (!o || typeof o.containers !== 'object' || typeof o.bullets !== 'object') throw new Error('Not a backup file');
       const n = Object.values(o.containers).filter(c => c.type !== 'inbox').length, m = Object.keys(o.bullets).length, k = o.folders ? Object.keys(o.folders).length : 0;
-      if (!confirm('Replace everything here with this backup (' + n + ' meetings/documents, ' + m + ' bullets, ' + k + ' people/projects)?\n(Ctrl+Z undoes this.)')) return;
+      if (!confirm('Replace everything with this backup (' + n + ' meetings/documents, ' + m + ' bullets, ' + k + ' people/projects)?' + (SY.connected ? '\nThis also replaces your notes in Drive and on your other laptops.' : '') + '\n(Ctrl+Z undoes this.)')) return;
       snap(); S.containers = o.containers; S.bullets = o.bullets; S.folders = o.folders || {}; ensureModel(); S.ui.current = null; S.ui.folder = null; save(); renderAll();
     } catch (err) { alert('Could not import: ' + err.message); }
     e.target.value = '';
@@ -1527,7 +1753,14 @@ $('#importFile').onchange = e => {
 })();
 if (S.ui.current && S.containers[S.ui.current]) openContainer(S.ui.current);
 else { S.ui.current = null; if (S.ui.folder && !S.folders[S.ui.folder]) S.ui.folder = null; renderAll(); }
-setStatus('Saved in this browser');
+$('#syncBtn').onclick = () => { if (syncState === 'error' && token) syncNow(); else connect(); };
+$('#confBtn').onclick = () => conflictsPop();
+window.addEventListener('online', () => syncNow());
+window.addEventListener('offline', () => { if (token) { syncState = 'offline'; showSync(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && token) syncNow(); });
+setInterval(() => { if (!document.hidden && (token || syncState === 'ok')) syncNow(); }, 60000); // pick up other laptops' edits
+showSync();
+if (token) syncNow();
 })();
 </script>
 </body>
