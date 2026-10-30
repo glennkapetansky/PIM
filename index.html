@@ -117,6 +117,7 @@ body.sweeping,body.sweeping *{-webkit-user-select:none!important;user-select:non
 .tw.has{cursor:pointer;color:var(--muted)}
 .tw.has:hover{color:var(--text)}
 .ck{margin:5px 2px 0 0;opacity:0;cursor:pointer;flex:0 0 auto}
+input[type="checkbox"]{accent-color:var(--accent)}
 .row:hover .ck,.ck.show,.ck:focus{opacity:1}
 .tx{flex:1;outline:none;min-width:40px;line-height:22px;white-space:pre-wrap;word-break:break-word}
 .tx:empty:before{content:attr(data-ph);color:var(--faint)}
@@ -736,6 +737,25 @@ function renderAll() { applyTheme(); renderSidebar(); renderBanner(); renderMain
 function renderSidebar() {
   const q = $('#filter').value.trim().toLowerCase();
   const lists = $('#lists'); lists.innerHTML = '';
+  const last = {};
+  for (const b of Object.values(S.bullets)) if (b.isSession && (!last[b.containerId] || b.date > last[b.containerId])) last[b.containerId] = b.date;
+  const byRecent = (a, b) => (last[b.id] || b.created).localeCompare(last[a.id] || a.created);
+  const mtgDate = c => fmt(last[c.id] || c.created);
+  // Meetings with a project are listed under that project (not while filtering, which shows flat matches)
+  const underProject = {};
+  if (!q) for (const c of Object.values(S.containers)) if (c.type === 'meeting') { const p = containerProject(c); if (p) (underProject[p] = underProject[p] || []).push(c); }
+  for (const k in underProject) underProject[k].sort(byRecent);
+  function containerRow(c, padLeft, dateFn) {
+    const it = el('div', 'item k-' + c.type + (c.id === S.ui.current ? ' cur' : '')); it.dataset.cid = c.id;
+    if (padLeft != null) it.style.paddingLeft = padLeft + 'px';
+    it.title = (c.title || 'Untitled') + ' · drop bullets here to move them';
+    if (padLeft != null) it.appendChild(el('span', 'ftw'));
+    const t = el('span', 't'); t.textContent = c.title || 'Untitled';
+    const d = el('span', 'd'); d.textContent = dateFn(c);
+    it.append(t, d);
+    it.onclick = () => openContainer(c.id);
+    lists.appendChild(it);
+  }
   for (const kind of ['person', 'project']) {
     const h = el('div', 'sec fsec'); h.dataset.kind = kind;
     const lab = el('span'); lab.textContent = KIND_LABEL[kind];
@@ -752,7 +772,8 @@ function renderSidebar() {
       const it = el('div', 'item folder k-' + f.kind + (f.id === S.ui.folder ? ' cur' : '')); it.dataset.fid = f.id; it.draggable = true;
       it.style.paddingLeft = (8 + depth * 14) + 'px';
       it.title = folderPath(f.id) + ' · drop bullets here to link them';
-      const tw = el('span', 'ftw'); const hasKids = !q && folderKids(f.id).length > 0;
+      const mtgs = underProject[f.id] || [];
+      const tw = el('span', 'ftw'); const hasKids = !q && (folderKids(f.id).length > 0 || mtgs.length > 0);
       tw.textContent = hasKids ? (f.collapsed ? '▸' : '▾') : '';
       if (hasKids) tw.onclick = ev => { ev.stopPropagation(); f.collapsed = !f.collapsed; save(); renderSidebar(); };
       const t = el('span', 't'); t.textContent = (f.name || 'Untitled') + (f.id === 'me' ? ' (To-Do)' : '');
@@ -761,27 +782,19 @@ function renderSidebar() {
       if (n) { const d = el('span', 'cnt'); d.textContent = n; d.title = n + ' open item' + (n > 1 ? 's' : ''); it.appendChild(d); }
       it.onclick = () => openFolder(f.id);
       lists.appendChild(it);
+      if (!f.collapsed) for (const c of mtgs) containerRow(c, 8 + (depth + 1) * 14, mtgDate);
     }
   }
-  const last = {};
-  for (const b of Object.values(S.bullets)) if (b.isSession && (!last[b.containerId] || b.date > last[b.containerId])) last[b.containerId] = b.date;
   const all = Object.values(S.containers).filter(c => !q || (c.title || 'untitled').toLowerCase().includes(q));
+  const nested = new Set(Object.values(underProject).flat().map(c => c.id));
   const sections = [
-    ['Meetings', all.filter(c => c.type === 'meeting').sort((a, b) => (last[b.id] || b.created).localeCompare(last[a.id] || a.created)), c => fmt(last[c.id] || c.created)],
-    ['Documents', all.filter(c => c.type === 'document').sort((a, b) => (a.title || '').localeCompare(b.title || '')), () => '']
+    ['Meetings', all.filter(c => c.type === 'meeting' && !nested.has(c.id)).sort(byRecent), mtgDate, nested.size ? 'All are under their projects' : 'None yet'],
+    ['Documents', all.filter(c => c.type === 'document').sort((a, b) => (a.title || '').localeCompare(b.title || '')), () => '', 'None yet']
   ];
-  for (const [name, items, dateFn] of sections) {
+  for (const [name, items, dateFn, none] of sections) {
     const h = el('div', 'sec'); h.textContent = name; lists.appendChild(h);
-    if (!items.length) { const e = el('div', 'empty-note'); e.textContent = q ? 'No matches' : 'None yet'; lists.appendChild(e); }
-    for (const c of items) {
-      const it = el('div', 'item k-' + c.type + (c.id === S.ui.current ? ' cur' : '')); it.dataset.cid = c.id;
-      it.title = (c.title || 'Untitled') + ' · drop bullets here to move them';
-      const t = el('span', 't'); t.textContent = c.title || 'Untitled';
-      const d = el('span', 'd'); d.textContent = dateFn(c);
-      it.append(t, d);
-      it.onclick = () => openContainer(c.id);
-      lists.appendChild(it);
-    }
+    if (!items.length) { const e = el('div', 'empty-note'); e.textContent = q ? 'No matches' : none; lists.appendChild(e); }
+    for (const c of items) containerRow(c, null, dateFn);
   }
 }
 
