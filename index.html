@@ -6,35 +6,39 @@
 <title>neoECCO</title>
 <script src="https://accounts.google.com/gsi/client" async></script>
 <style>
+/* Parchment palette. Color carries meaning, and the same color means the same thing everywhere:
+   green = people, amber = projects, indigo = meetings and their dated sessions, blue = links and actions,
+   red = errors. Text colors keep at least 4.5:1 contrast on their background. */
 :root{
-  --bg:#fbfbfa; --panel:#f3f2ef; --text:#1d1d1b; --muted:#85837d; --faint:#b9b6af;
-  --line:#e3e1dc; --accent:#2f6fde; --accent-bg:#e8effc; --hover:#ecebe6;
-  --done:#9a978f; --warn-bg:#fff4d6; --warn:#7a5a00; --session:#5641b8; --session-bg:#f1eefc;
-  --pill:#eceae4;
-  --per:#1d6b4f; --per-bg:#e3f2ea; --prj:#8a4b00; --prj-bg:#fbeedb;
+  --bg:#fbf7ec; --panel:#f2ead8; --text:#2b2620; --muted:#6b6152; --faint:#b3a78f;
+  --line:#e2d7bf; --accent:#2c5aa8; --accent-bg:#e2e8f2; --hover:#efe6d1;
+  --done:#958a76; --warn-bg:#f6e3b8; --warn:#5f4500; --session:#4a3c8c; --session-bg:#ebe5f0;
+  --pill:#ebe1cb; --err:#b3261e; --doc:#6b6152;
+  --per:#1c6847; --per-bg:#dcecdc; --prj:#8a4300; --prj-bg:#f6dfbf;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --bg:#1b1c1e; --panel:#222326; --text:#e6e5e1; --muted:#8f8d88; --faint:#5d5c58;
-    --line:#33343a; --accent:#6b9cff; --accent-bg:#26324a; --hover:#2b2c30;
-    --done:#77756f; --warn-bg:#3a3220; --warn:#e8c56a; --session:#ab9dff; --session-bg:#2a2640;
-    --pill:#2e2f34;
-    --per:#7fd3ae; --per-bg:#1f3a2f; --prj:#f0b46a; --prj-bg:#3d2e1a;
+    --bg:#1e1c18; --panel:#26231e; --text:#ece6d8; --muted:#a69d8c; --faint:#5f584c;
+    --line:#38332b; --accent:#8fb0ff; --accent-bg:#27324a; --hover:#2e2a23;
+    --done:#7f7768; --warn-bg:#3b3120; --warn:#e8c56a; --session:#bcadff; --session-bg:#2b2740;
+    --pill:#322d25; --err:#ff8a80; --doc:#a69d8c;
+    --per:#86d3b0; --per-bg:#1f3a2f; --prj:#f0b46a; --prj-bg:#3d2e1a;
   }
 }
 :root[data-theme="dark"]{
-  --bg:#1b1c1e; --panel:#222326; --text:#e6e5e1; --muted:#8f8d88; --faint:#5d5c58;
-  --line:#33343a; --accent:#6b9cff; --accent-bg:#26324a; --hover:#2b2c30;
-  --done:#77756f; --warn-bg:#3a3220; --warn:#e8c56a; --session:#ab9dff; --session-bg:#2a2640;
-  --pill:#2e2f34;
-  --per:#7fd3ae; --per-bg:#1f3a2f; --prj:#f0b46a; --prj-bg:#3d2e1a;
+  --bg:#1e1c18; --panel:#26231e; --text:#ece6d8; --muted:#a69d8c; --faint:#5f584c;
+  --line:#38332b; --accent:#8fb0ff; --accent-bg:#27324a; --hover:#2e2a23;
+  --done:#7f7768; --warn-bg:#3b3120; --warn:#e8c56a; --session:#bcadff; --session-bg:#2b2740;
+  --pill:#322d25; --err:#ff8a80; --doc:#a69d8c;
+  --per:#86d3b0; --per-bg:#1f3a2f; --prj:#f0b46a; --prj-bg:#3d2e1a;
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--text);font:14px/1.55 "Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;display:flex;overflow:hidden}
 button{font:inherit;color:inherit;background:none;border:1px solid var(--line);border-radius:5px;padding:2px 8px;cursor:pointer}
 button:hover{background:var(--hover)}
-button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+button:focus-visible,select:focus-visible,input:focus-visible,.item:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:2px 6px}
 
 /* Sidebar */
@@ -49,7 +53,10 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .sec{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:10px 14px 3px;font-weight:600}
 .item{display:flex;gap:6px;align-items:baseline;padding:2px 14px;cursor:pointer;white-space:nowrap;overflow:hidden}
 .item:hover{background:var(--hover)}
-.item.cur{background:var(--accent-bg)}
+.item.cur{background:var(--accent-bg);box-shadow:inset 3px 0 0 var(--accent)}
+/* a small colored dot says what kind of thing each sidebar entry is */
+.item .t::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:1px;background:var(--dot,transparent)}
+.item.k-person{--dot:var(--per)} .item.k-project{--dot:var(--prj)} .item.k-meeting{--dot:var(--session)} .item.k-document{--dot:var(--doc)}
 .item .t{flex:1;overflow:hidden;text-overflow:ellipsis}
 .item .d{font-size:11px;color:var(--muted)}
 .empty-note{color:var(--muted);font-size:12px;padding:2px 14px}
@@ -64,15 +71,16 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .item.flash{animation:flash 1.2s}
 #pop .menu button{display:block;width:100%;text-align:left;border:none;padding:4px 6px}
 #pop select{max-width:200px}
-#pop .danger{color:#d33}
+#pop .danger{color:var(--err)}
 #side .foot{border-top:1px solid var(--line);padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px}
 #status{color:var(--muted);flex:1 0 100%}
-#status.err{color:#d33}
+#status.err{color:var(--err)}
 #side .foot button[hidden]{display:none}
-#syncBtn.urgent{background:var(--text);border-color:var(--text);color:var(--bg);font-weight:600;animation:pulse 1.6s ease-in-out infinite}
-#syncBtn.urgent:hover{opacity:.85}
+/* a button that needs you now (Reconnect, Export when a backup is due): dark, pulsing */
+#side .foot button.urgent{background:var(--text);border-color:var(--text);color:var(--bg);font-weight:600;animation:pulse 1.6s ease-in-out infinite}
+#side .foot button.urgent:hover{opacity:.85}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(47,111,222,.6)}50%{box-shadow:0 0 0 6px rgba(47,111,222,0)}}
-@media (prefers-reduced-motion: reduce){#syncBtn.urgent{animation:none}}
+@media (prefers-reduced-motion: reduce){#side .foot button.urgent{animation:none}}
 #pop .conf{max-height:50vh;overflow:auto;max-width:420px}
 #pop .ci{border-top:1px solid var(--line);padding:6px 0;white-space:pre-wrap;word-break:break-word}
 #pop .ci .cm{font-size:11.5px;color:var(--muted)}
@@ -465,6 +473,7 @@ function showSync() {
     default: msg = n ? 'Saving to Drive…' : 'Synced with Drive' + (SY.last ? ' ' + new Date(SY.last).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
   }
   setStatus(msg, err);
+  renderBanner();
   const b = $('#syncBtn'); b.hidden = !btn; if (btn) b.textContent = btn;
   b.classList.toggle('urgent', syncState === 'auth');
   const c = $('#confBtn'); c.hidden = !CONF.length; c.textContent = 'Conflicts (' + CONF.length + ')';
@@ -740,7 +749,7 @@ function renderSidebar() {
     } else (function walk(pid, depth) { for (const f of folderKids(pid, kind)) { rows.push([f, depth]); if (!f.collapsed) walk(f.id, depth + 1); } })(null, 0);
     if (!rows.length) { const e = el('div', 'empty-note'); e.textContent = q ? 'No matches' : 'Click + to add one'; lists.appendChild(e); }
     for (const [f, depth] of rows) {
-      const it = el('div', 'item folder' + (f.id === S.ui.folder ? ' cur' : '')); it.dataset.fid = f.id; it.draggable = true;
+      const it = el('div', 'item folder k-' + f.kind + (f.id === S.ui.folder ? ' cur' : '')); it.dataset.fid = f.id; it.draggable = true;
       it.style.paddingLeft = (8 + depth * 14) + 'px';
       it.title = folderPath(f.id) + ' · drop bullets here to link them';
       const tw = el('span', 'ftw'); const hasKids = !q && folderKids(f.id).length > 0;
@@ -765,7 +774,7 @@ function renderSidebar() {
     const h = el('div', 'sec'); h.textContent = name; lists.appendChild(h);
     if (!items.length) { const e = el('div', 'empty-note'); e.textContent = q ? 'No matches' : 'None yet'; lists.appendChild(e); }
     for (const c of items) {
-      const it = el('div', 'item' + (c.id === S.ui.current ? ' cur' : '')); it.dataset.cid = c.id;
+      const it = el('div', 'item k-' + c.type + (c.id === S.ui.current ? ' cur' : '')); it.dataset.cid = c.id;
       it.title = (c.title || 'Untitled') + ' · drop bullets here to move them';
       const t = el('span', 't'); t.textContent = c.title || 'Untitled';
       const d = el('span', 'd'); d.textContent = dateFn(c);
@@ -777,17 +786,16 @@ function renderSidebar() {
 }
 
 function renderBanner() {
-  const b = $('#banner');
+  // Backup reminder: the Export button turns dark and pulses when a backup is due
+  // (monthly once Drive sync runs; weekly while notes live only in this browser).
   const last = S.ui.lastExport ? new Date(S.ui.lastExport) : null;
   const days = last ? (Date.now() - last.getTime()) / 864e5 : Infinity;
   const hasData = Object.keys(S.bullets).length > 0, synced = !!(SY.connected && SY.last);
-  if (hasData && days > (synced ? 30 : 7)) {
-    b.hidden = false;
-    b.innerHTML = '';
-    const s = el('span'); s.textContent = (synced ? 'Monthly backup: keep a copy that doesn\'t depend on Google. ' : 'Notes are stored only in this browser until you connect Google Drive (bottom left). ') + (last ? 'Last backup: ' + fmt(isoOf(last)) + '.' : 'No backup yet.');
-    const btn = el('button'); btn.textContent = 'Export backup'; btn.onclick = exportData;
-    b.append(s, btn);
-  } else b.hidden = true;
+  const due = hasData && days > (synced ? 30 : 7);
+  const btn = $('#exportBtn');
+  btn.classList.toggle('urgent', due);
+  btn.textContent = due ? 'Export: backup due' : 'Export';
+  btn.title = (last ? 'Last backup: ' + fmt(isoOf(last), { month: 'short', day: 'numeric', year: 'numeric' }) : 'No backup yet') + ' · downloads a complete copy of your notes, independent of Google';
 }
 
 function tagHTML(l, removable) {
