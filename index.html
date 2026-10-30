@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ecco PIM</title>
+<title>neoECCO</title>
 <script src="https://accounts.google.com/gsi/client" async></script>
 <style>
 :root{
@@ -40,7 +40,8 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 /* Sidebar */
 #side{width:250px;min-width:250px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;height:100%}
 #side .top{padding:12px 12px 6px;display:flex;align-items:center;gap:6px}
-#side .brand{font-weight:700;letter-spacing:.2px;flex:1}
+#side .brand{font-weight:700;letter-spacing:.2px;flex:1;border:none;padding:0;background:none;text-align:left;cursor:pointer}
+#side .brand:hover{background:none;color:var(--accent)}
 #side .new{display:flex;gap:6px;padding:0 12px 8px}
 #side .new button{flex:1}
 #filter{margin:0 12px 8px;width:calc(100% - 24px)}
@@ -68,6 +69,10 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 #status{color:var(--muted);flex:1 0 100%}
 #status.err{color:#d33}
 #side .foot button[hidden]{display:none}
+#syncBtn.urgent{background:var(--text);border-color:var(--text);color:var(--bg);font-weight:600;animation:pulse 1.6s ease-in-out infinite}
+#syncBtn.urgent:hover{opacity:.85}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(47,111,222,.6)}50%{box-shadow:0 0 0 6px rgba(47,111,222,0)}}
+@media (prefers-reduced-motion: reduce){#syncBtn.urgent{animation:none}}
 #pop .conf{max-height:50vh;overflow:auto;max-width:420px}
 #pop .ci{border-top:1px solid var(--line);padding:6px 0;white-space:pre-wrap;word-break:break-word}
 #pop .ci .cm{font-size:11.5px;color:var(--muted)}
@@ -164,7 +169,7 @@ body.sweeping,body.sweeping *{-webkit-user-select:none!important;user-select:non
 </head>
 <body>
 <aside id="side">
-  <div class="top"><span class="brand">Ecco PIM</span></div>
+  <div class="top"><button id="homeBtn" class="brand" title="Home">neoECCO</button></div>
   <div class="new">
     <button id="newMeeting" title="New meeting item">+ Meeting</button>
     <button id="newDoc" title="New document">+ Document</button>
@@ -449,6 +454,7 @@ function addConflict(k, v, mt, side, winner) { // keep the losing bullet text, o
 function showSync() {
   const n = dirtyKeys().length, w = n ? ' · ' + plural(n, 'change') + ' not yet in Drive' : '';
   let msg, err = false, btn = null;
+  if (!navigator.onLine && SY.connected && (syncState === 'auth' || syncState === 'error')) syncState = 'offline'; // can't reconnect without a network
   switch (syncState) {
     case 'off': msg = 'Saved in this browser only'; btn = 'Connect Google Drive'; break;
     case 'auth': msg = 'Drive disconnected' + w; btn = 'Reconnect'; break;
@@ -459,6 +465,7 @@ function showSync() {
   }
   setStatus(msg, err);
   const b = $('#syncBtn'); b.hidden = !btn; if (btn) b.textContent = btn;
+  b.classList.toggle('urgent', syncState === 'auth');
   const c = $('#confBtn'); c.hidden = !CONF.length; c.textContent = 'Conflicts (' + CONF.length + ')';
 }
 
@@ -1711,6 +1718,11 @@ lists.addEventListener('contextmenu', e => {
 });
 
 /* ---------- sidebar & footer ---------- */
+$('#homeBtn').onclick = () => { // Home: the start screen for now; becomes the Today view in stage 4
+  if (S.ui.current) cleanupEmptySession(S.ui.current);
+  bsel.clear(); selAnchor = selFocus = null;
+  S.ui.current = null; S.ui.folder = null; save(); renderAll(); $('#main').scrollTop = 0;
+};
 $('#newMeeting').onclick = () => createContainer('meeting');
 $('#newDoc').onclick = () => createContainer('document');
 $('#filter').addEventListener('input', renderSidebar);
@@ -1756,7 +1768,9 @@ else { S.ui.current = null; if (S.ui.folder && !S.folders[S.ui.folder]) S.ui.fol
 $('#syncBtn').onclick = () => { if (syncState === 'error' && token) syncNow(); else connect(); };
 $('#confBtn').onclick = () => conflictsPop();
 window.addEventListener('online', () => syncNow());
-window.addEventListener('offline', () => { if (token) { syncState = 'offline'; showSync(); } });
+window.addEventListener('offline', () => { if (SY.connected) { syncState = 'offline'; showSync(); } });
+// Keep a copy of the page in the browser so it opens without a network (needs sw.js next to index.html).
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {});
 document.addEventListener('visibilitychange', () => { if (!document.hidden && token) syncNow(); });
 setInterval(() => { if (!document.hidden && (token || syncState === 'ok')) syncNow(); }, 60000); // pick up other laptops' edits
 showSync();
