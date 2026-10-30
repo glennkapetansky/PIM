@@ -62,6 +62,7 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .item.flash{animation:flash 1.2s}
 #pop .menu button{display:block;width:100%;text-align:left;border:none;padding:4px 6px}
 #pop select{max-width:200px}
+#pop .danger{color:#d33}
 #side .foot{border-top:1px solid var(--line);padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px}
 #status{color:var(--muted);flex:1 0 100%}
 #status.err{color:#d33}
@@ -91,6 +92,8 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .kids{margin-left:11px;padding-left:10px;border-left:1px solid var(--line)}
 .row{display:flex;align-items:flex-start;gap:4px;min-height:22px;border-radius:4px;padding:0 4px}
 .row:hover{background:var(--hover)}
+.row.sel,.row.sel:hover{background:var(--accent-bg);box-shadow:inset 2px 0 0 var(--accent)}
+body.sweeping,body.sweeping *{-webkit-user-select:none!important;user-select:none!important}
 .tw{width:14px;flex:0 0 14px;text-align:center;color:var(--faint);font-size:11px;line-height:22px;user-select:none}
 .tw.has{cursor:pointer;color:var(--muted)}
 .tw.has:hover{color:var(--text)}
@@ -140,6 +143,11 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 #pop label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0}
 #pop .btns{display:flex;gap:6px;justify-content:flex-end;margin-top:8px}
 
+/* Toast */
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:20;background:var(--text);color:var(--bg);border-radius:8px;padding:6px 8px 6px 14px;font-size:13px;display:none;align-items:center;gap:12px;box-shadow:0 4px 16px rgba(0,0,0,.25)}
+#toast button{color:inherit;border-color:currentColor;padding:1px 10px}
+#toast button:hover{background:transparent;opacity:.8}
+
 /* Empty state */
 .welcome{max-width:620px;color:var(--muted);margin-top:40px}
 .welcome h2{color:var(--text);font-size:18px;margin:0 0 8px}
@@ -170,6 +178,7 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
   <div id="content"></div>
 </main>
 <div id="pop"></div>
+<div id="toast"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
 
 <script>
 (function(){
@@ -188,6 +197,8 @@ const esc = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '
 const linkify = t => esc(t || '').replace(/(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
 const $ = s => document.querySelector(s);
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
 
 /* ---------- state ---------- */
 function blank() { return { version: 2, containers: {}, bullets: {}, folders: {}, ui: { current: null, folder: null, lastExport: null, theme: null } }; }
@@ -206,6 +217,8 @@ function ensureModel() {
   for (const b of Object.values(S.bullets)) if (!b.links) b.links = [];
 }
 ensureModel();
+// block selection: ids of selected bullets (visible rows), plus the anchor and moving end of the range
+let bsel = new Set(), selAnchor = null, selFocus = null;
 
 let saveTimer = null;
 function setStatus(msg, err) { const s = $('#status'); s.textContent = msg; s.classList.toggle('err', !!err); }
@@ -227,10 +240,20 @@ function restoreFrom(str) {
   const o = JSON.parse(str); S.containers = o.c; S.bullets = o.b; if (o.f) S.folders = o.f; ensureModel();
   if (S.ui.current && !S.containers[S.ui.current]) S.ui.current = null;
   if (S.ui.folder && !S.folders[S.ui.folder]) S.ui.folder = null;
+  bsel.clear(); selAnchor = selFocus = null; hideToast();
   save(); renderAll();
 }
 function undo() { if (!undoStack.length) return; const f = focusInfo(); redoStack.push(snapshot()); restoreFrom(undoStack.pop()); refocus(f); }
 function redo() { if (!redoStack.length) return; const f = focusInfo(); undoStack.push(snapshot()); restoreFrom(redoStack.pop()); refocus(f); }
+
+let toastTimer = null;
+function toast(msg, canUndo) {
+  const t = $('#toast'); $('#toastMsg').textContent = msg;
+  $('#toastUndo').style.display = canUndo === false ? 'none' : '';
+  t.style.display = 'flex';
+  clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, 8000);
+}
+function hideToast() { const t = $('#toast'); if (t) t.style.display = 'none'; }
 
 /* ---------- model helpers ---------- */
 function kidsIndex(cid) {
@@ -254,6 +277,7 @@ function newBullet(cid, pid, order, extra) {
   S.bullets[b.id] = b; return b;
 }
 function deleteTree(id) { for (const k of Object.values(S.bullets).filter(x => x.parentId === id)) deleteTree(k.id); delete S.bullets[id]; }
+function countTree(id) { return 1 + Object.values(S.bullets).filter(x => x.parentId === id).reduce((a, k) => a + countTree(k.id), 0); }
 function treeEmpty(id) { const b = S.bullets[id]; if ((b.text || '').trim()) return false; return Object.values(S.bullets).filter(x => x.parentId === id).every(k => treeEmpty(k.id)); }
 function sessionsOf(cid) { return Object.values(S.bullets).filter(b => b.containerId === cid && b.isSession); }
 function hasTask(b) { return !!(b.done || b.start || b.end || (b.links && b.links.length)); }
@@ -261,6 +285,18 @@ function effDate(b) {
   let x = b; while (x) { if (x.isSession) return x.date; x = x.parentId ? S.bullets[x.parentId] : null; }
   if (b.created) return isoOf(new Date(b.created));
   const c = S.containers[b.containerId]; return c ? c.created : null;
+}
+function setContainerDeep(b, cid) { b.containerId = cid; for (const k of Object.values(S.bullets)) if (k.parentId === b.id) setContainerDeep(k, cid); }
+// Put bullets ids (in order) under parentId at sibling index k (counted without the moved ones).
+function placeAt(ids, parentId, cid, k) {
+  const moving = new Set(ids);
+  const sib = childList(parentId, cid).filter(x => !moving.has(x.id)), n = ids.length;
+  const lo = sib[k - 1] ? sib[k - 1].order : (sib[k] ? sib[k].order - n - 1 : 0);
+  const hi = sib[k] ? sib[k].order : lo + n + 1;
+  ids.forEach((id, i) => {
+    const b = S.bullets[id]; b.parentId = parentId || null; b.order = lo + (hi - lo) * (i + 1) / (n + 1);
+    if (b.containerId !== cid) setContainerDeep(b, cid);
+  });
 }
 
 /* ---------- people & projects (folders) and links ---------- */
@@ -347,6 +383,7 @@ function newFolder(kind, parentId) {
 }
 function openFolder(fid, focusTitle) {
   if (S.ui.current) cleanupEmptySession(S.ui.current);
+  bsel.clear(); selAnchor = selFocus = null;
   S.ui.current = null; S.ui.folder = fid;
   save(); renderAll();
   if (focusTitle) { const t = $('.head .title'); if (t) t.focus(); }
@@ -381,6 +418,7 @@ function cleanupEmptySession(cid) {
 }
 function openContainer(id, focusTitle) {
   if (S.ui.current && S.ui.current !== id) cleanupEmptySession(S.ui.current);
+  bsel.clear(); selAnchor = selFocus = null;
   S.ui.current = id; S.ui.folder = null;
   const c = S.containers[id];
   let focusId = null;
@@ -512,7 +550,8 @@ function renderSidebar() {
     const h = el('div', 'sec'); h.textContent = name; lists.appendChild(h);
     if (!items.length) { const e = el('div', 'empty-note'); e.textContent = q ? 'No matches' : 'None yet'; lists.appendChild(e); }
     for (const c of items) {
-      const it = el('div', 'item' + (c.id === S.ui.current ? ' cur' : ''));
+      const it = el('div', 'item' + (c.id === S.ui.current ? ' cur' : '')); it.dataset.cid = c.id;
+      it.title = (c.title || 'Untitled') + ' · drop bullets here to move them';
       const t = el('span', 't'); t.textContent = c.title || 'Untitled';
       const d = el('span', 'd'); d.textContent = dateFn(c);
       it.append(t, d);
@@ -563,11 +602,11 @@ function metaHTML(b, kidCount) {
 function nodeEl(b, idx) {
   const kids = idx.get(b.id) || [];
   const n = el('div', 'node'); n.dataset.id = b.id;
-  const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : ''));
+  const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : '') + (bsel.has(b.id) ? ' sel' : ''));
   const tw = el('span', 'tw');
   if (kids.length) { tw.textContent = b.collapsed ? '▸' : '▾'; tw.classList.add('has'); tw.title = 'Click: collapse / expand (Ctrl+.)'; }
   else tw.textContent = b.isSession ? '' : '•';
-  if (!b.isSession) { tw.draggable = true; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag: onto a person or project to link, or within the notes to move'; }
+  if (!b.isSession) { tw.draggable = true; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag: onto a person or project to link, onto a meeting or document to move, or within the notes to reorder'; }
   row.appendChild(tw);
   if (b.isSession) {
     const d = el('span', 'sdate'); d.textContent = fmtLong(b.date); d.title = 'Click to change the date or delete this session'; row.appendChild(d);
@@ -772,13 +811,16 @@ function renderFolder(ct, f) {
 
 function welcome() {
   const w = el('div', 'welcome');
+  const M = isMac ? 'Cmd' : 'Ctrl';
   w.innerHTML = '<h2>Pick a meeting or document, or start one.</h2>' +
-    '<p>Opening a meeting adds today\'s dated session at the top. Drag a bullet\'s dot onto a person or project in the sidebar to link it; right-click a bullet for dates and links.</p>' +
+    '<p>Opening a meeting adds today\'s dated session at the top. Drag a bullet\'s dot onto a person or project in the sidebar to link it, or onto a meeting or document to move it there. Right-click a bullet for dates, links, move and delete.</p>' +
     '<table>' + [
       ['Enter', 'New bullet (splits at the cursor)'], ['Tab / Shift+Tab', 'Indent / outdent'],
-      ['Ctrl+Enter', 'Check / uncheck'], ['Ctrl+.', 'Collapse / expand'],
-      ['Ctrl+↑ / Ctrl+↓', 'Move bullet'], ['Ctrl+Z / Ctrl+Y', 'Undo / redo'],
-      ['Right-click', 'Set start / end dates']
+      [M + '+Enter', 'Check / uncheck'], [M + '+.', 'Collapse / expand'],
+      [M + '+↑ / ' + M + '+↓', 'Move bullet'], [M + '+Z / ' + M + '+Shift+Z', 'Undo / redo'],
+      ['Drag across bullets', 'Select a block'],
+      ['With a block selected', 'Delete, Tab / Shift+Tab, drag a dot, or right-click'],
+      ['Right-click', 'Dates, links, move to, delete']
     ].map(([k, v]) => '<tr><td><kbd>' + k + '</kbd></td><td>' + v + '</td></tr>').join('') + '</table>';
   const btns = el('p'); const a = el('button', 'primary'); a.textContent = '+ Meeting'; a.onclick = () => createContainer('meeting');
   const b = el('button'); b.textContent = '+ Document'; b.onclick = () => createContainer('document');
@@ -798,6 +840,114 @@ function reveal(id) {
 /* ---------- outline events ---------- */
 const content = $('#content');
 const bulletOf = node => S.bullets[node.closest('.node').dataset.id];
+
+/* ---------- block selection and block actions ---------- */
+function selectableIds() {
+  return [...content.querySelectorAll('.outline .node')].filter(n => !n.firstElementChild.classList.contains('session')).map(n => n.dataset.id);
+}
+function paintSel() {
+  content.querySelectorAll('.row.sel').forEach(r => r.classList.remove('sel'));
+  for (const n of content.querySelectorAll('.outline .node')) if (bsel.has(n.dataset.id)) n.firstElementChild.classList.add('sel');
+}
+function blurText() { const a = document.activeElement; if (a && a.classList && a.classList.contains('tx')) a.blur(); }
+function clearSel() { if (!bsel.size) return; bsel.clear(); selAnchor = selFocus = null; paintSel(); }
+function selectRange(a, b) {
+  const list = selectableIds(), i = list.indexOf(a), j = list.indexOf(b);
+  if (i < 0 || j < 0) return;
+  bsel = new Set(list.slice(Math.min(i, j), Math.max(i, j) + 1)); selAnchor = a; selFocus = b;
+  blurText(); paintSel();
+}
+// Selected bullets whose parent is not also selected, in screen order. Sub-bullets travel with these.
+function selRoots() {
+  const order = selectableIds();
+  return [...bsel].filter(id => {
+    const b = S.bullets[id]; if (!b || b.isSession) return false;
+    let p = b.parentId ? S.bullets[b.parentId] : null;
+    while (p) { if (bsel.has(p.id)) return false; p = p.parentId ? S.bullets[p.parentId] : null; }
+    return true;
+  }).sort((x, y) => order.indexOf(x) - order.indexOf(y));
+}
+function deleteItems(ids) {
+  ids = ids.filter(id => S.bullets[id] && !S.bullets[id].isSession); if (!ids.length) return;
+  snap(); let n = 0;
+  for (const id of ids) if (S.bullets[id]) { n += countTree(id); deleteTree(id); }
+  bsel.clear(); selAnchor = selFocus = null;
+  save(); renderAll(); toast('Deleted ' + plural(n, 'bullet'));
+}
+function moveToContainer(ids, cid) {
+  const c = S.containers[cid]; ids = ids.filter(id => S.bullets[id] && !S.bullets[id].isSession);
+  if (!c || !ids.length) return;
+  snap();
+  for (const id of ids) { // meetings: file each under a session with the date it was written, so dates survive the move
+    const b = S.bullets[id];
+    const parent = c.type === 'meeting' ? sessionFor(cid, effDate(b) || todayISO()).id : null;
+    b.order = orderLast(parent, cid); b.parentId = parent; setContainerDeep(b, cid);
+  }
+  bsel.clear(); selAnchor = selFocus = null;
+  save(); renderAll();
+  const it = document.querySelector('.item[data-cid="' + cid + '"]'); if (it) it.classList.add('flash');
+  toast('Moved ' + plural(ids.length, 'item') + ' to ' + (c.title || 'Untitled') + (c.type === 'meeting' ? ', under their original dates' : ''));
+}
+function linkItems(ids, fid) {
+  ids = ids.filter(id => S.bullets[id]); if (!ids.length || !S.folders[fid]) return;
+  snap();
+  const n = ids.filter(id => addLink(S.bullets[id], fid)).length;
+  if (!n) { undoStack.pop(); toast(folderName(fid) + ' is already linked', false); return; }
+  save(); renderAll(); flashFolder(fid);
+  toast('Linked ' + plural(n, 'item') + ' to ' + folderName(fid));
+}
+function setDoneItems(ids, val) {
+  snap(); const now = new Date().toISOString();
+  for (const id of ids) {
+    const b = S.bullets[id]; if (!b || b.isSession) continue;
+    if (val && !b.done) { b.done = true; b.doneAt = now; } else if (!val) { b.done = false; b.doneAt = null; }
+  }
+  save(); renderAll();
+}
+function shiftBlock(out) {
+  if (S.ui.folder) { toast('Indent in the meeting or document itself; this view mixes several notes', false); return; }
+  const roots = selRoots(); if (!roots.length) return;
+  const rootSet = new Set(roots);
+  snap(); let moved = 0;
+  for (const id of (out ? roots.slice().reverse() : roots)) {
+    const b = S.bullets[id];
+    if (out) {
+      const p = b.parentId ? S.bullets[b.parentId] : null; if (!p || p.isSession) continue;
+      b.order = orderAfter(p); b.parentId = p.parentId; moved++;
+    } else {
+      const s = siblings(b), p = s[s.indexOf(b) - 1]; if (!p || p.isSession || rootSet.has(p.id)) continue;
+      b.order = orderLast(p.id, b.containerId); b.parentId = p.id; p.collapsed = false; moved++;
+    }
+  }
+  if (!moved) { undoStack.pop(); return; }
+  save(); renderAll();
+}
+
+// Mouse: drag across bullets to sweep a block.
+let sweep = null;
+content.addEventListener('mousedown', e => {
+  const row = e.target.closest('.outline .row');
+  if (e.button !== 0 || (isMac && e.ctrlKey)) { // right-click (Ctrl+click on a Mac): keep the block, don't focus the text
+    if (row && row.classList.contains('sel')) e.preventDefault();
+    return;
+  }
+  const node = row && !row.classList.contains('session') ? row.closest('.node') : null;
+  if (bsel.size && !(row && row.classList.contains('sel') && e.target.classList.contains('tw'))) clearSel(); // a selected dot starts a block drag
+  if (node && e.target.closest('.tx')) sweep = { start: node.dataset.id, active: false };
+});
+document.addEventListener('mousemove', e => {
+  if (!sweep) return;
+  if (!(e.buttons & 1)) { endSweep(); return; }
+  const hit = document.elementFromPoint(e.clientX, e.clientY);
+  const row = hit && hit.closest && hit.closest('#content .outline .row');
+  if (!row || row.classList.contains('session')) return;
+  const id = row.closest('.node').dataset.id;
+  if (!sweep.active) { if (id === sweep.start) return; sweep.active = true; document.body.classList.add('sweeping'); }
+  getSelection().removeAllRanges();
+  if (id !== selFocus || !bsel.size) selectRange(sweep.start, id);
+});
+function endSweep() { sweep = null; document.body.classList.remove('sweeping'); }
+document.addEventListener('mouseup', endSweep);
 
 let focusAtMouseDown = null;
 content.addEventListener('mousedown', e => {
@@ -828,6 +978,7 @@ content.addEventListener('change', e => {
 });
 content.addEventListener('focusin', e => {
   const t = e.target; if (!t.classList || !t.classList.contains('tx')) return;
+  if (bsel.size) clearSel();
   if (t.querySelector('a')) { t.textContent = bulletOf(t).text; setCaret(t, 'end'); }
 });
 content.addEventListener('focusout', e => {
@@ -1033,8 +1184,8 @@ content.addEventListener('keydown', e => {
     commit(nb.id, 0); return;
   }
   if (e.key === 'Backspace' && !mod) {
-    const sel = getSelection();
-    if (!sel.isCollapsed || getCaret(t) !== 0 || b.isSession) return;
+    const ts = getSelection();
+    if (!ts.isCollapsed || getCaret(t) !== 0 || b.isSession) return;
     if (isRoot) { // never merge across items from different notes
       if (t.textContent || childList(b.id, cid).length) return;
       e.preventDefault(); snap();
@@ -1088,7 +1239,7 @@ content.addEventListener('keydown', e => {
   if (e.key === 'Escape') t.blur();
 });
 
-/* ---------- date popover ---------- */
+/* ---------- popovers ---------- */
 const pop = $('#pop');
 let popFor = null;
 function placePop(x, y) {
@@ -1127,7 +1278,13 @@ content.addEventListener('click', e => {
 });
 function folderOptions(exclude) {
   return ['person', 'project'].map(k => '<optgroup label="' + KIND_LABEL[k] + '">' +
-    flatFolders(k).filter(([f]) => !exclude.has(f.id)).map(([f, d]) => '<option value="' + f.id + '">' + '\u00a0\u00a0'.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('') + '</optgroup>').join('');
+    flatFolders(k).filter(([f]) => !exclude.has(f.id)).map(([f, d]) => '<option value="' + f.id + '">' + '  '.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('') + '</optgroup>').join('');
+}
+function moveOptions(excludeId) {
+  const cs = Object.values(S.containers).filter(c => (c.type === 'meeting' || c.type === 'document') && c.id !== excludeId)
+    .sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+  return [['meeting', 'Meetings'], ['document', 'Documents']].map(([t, l]) => '<optgroup label="' + l + '">' +
+    cs.filter(c => c.type === t).map(c => '<option value="' + c.id + '">' + esc(c.title || 'Untitled') + '</option>').join('') + '</optgroup>').join('');
 }
 function tagPop(target, fid, x, y, isBullet) {
   popFor = isBullet ? target : null;
@@ -1142,6 +1299,24 @@ function tagPop(target, fid, x, y, isBullet) {
   $('#tOpen').onclick = () => { popFor = null; closePop(); openFolder(fid); };
   $('#tDel').onclick = () => { snap(); removeLink(target, fid); done(); };
 }
+function blockPop(x, y) {
+  popFor = null;
+  const roots = selRoots();
+  const n = [...bsel].filter(id => S.bullets[id] && !S.bullets[id].isSession).length;
+  const total = roots.reduce((a, id) => a + countTree(id), 0);
+  const cids = new Set(roots.map(id => S.bullets[id].containerId));
+  pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">' + plural(n, 'bullet') + ' selected</div><div class="menu">' +
+    '<button id="bDone">Check off all</button><button id="bUndone">Uncheck all</button></div>' +
+    '<label>Link to <select id="bLink"><option value="">choose…</option>' + folderOptions(new Set()) + '</select></label>' +
+    '<label>Move to <select id="bMove"><option value="">choose…</option>' + moveOptions(cids.size === 1 ? [...cids][0] : null) + '</select></label>' +
+    '<div class="btns"><button id="bDel" class="danger">Delete ' + plural(total, 'bullet') + '</button></div>';
+  placePop(x, y);
+  $('#bDone').onclick = () => { closePop(); setDoneItems([...bsel], true); };
+  $('#bUndone').onclick = () => { closePop(); setDoneItems([...bsel], false); };
+  $('#bLink').onchange = () => { const v = $('#bLink').value; if (!v) return; closePop(); linkItems(selRoots(), v); };
+  $('#bMove').onchange = () => { const v = $('#bMove').value; if (!v) return; closePop(); moveToContainer(selRoots(), v); };
+  $('#bDel').onclick = () => { closePop(); deleteItems(selRoots()); };
+}
 content.addEventListener('contextmenu', e => {
   const tg = e.target.closest('.tag');
   if (tg) {
@@ -1152,17 +1327,23 @@ content.addEventListener('contextmenu', e => {
     return;
   }
   const row = e.target.closest('.row'); if (!row) return;
-  if (row.classList.contains('session')) { e.preventDefault(); sessionPop(bulletOf(row), e.clientX, e.clientY); return; }
+  if (row.classList.contains('session')) { e.preventDefault(); clearSel(); sessionPop(bulletOf(row), e.clientX, e.clientY); return; }
   e.preventDefault();
+  const rid = row.closest('.node').dataset.id;
+  if (bsel.size > 1 && bsel.has(rid)) { blockPop(e.clientX, e.clientY); return; }
+  clearSel();
   popFor = bulletOf(row);
   const b = popFor;
+  const sub = countTree(b.id) - 1;
   pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">Dates</div>' +
     '<label>Start <input type="date" id="pStart" value="' + (b.start || '') + '"></label>' +
     '<label>End <input type="date" id="pEnd" value="' + (b.end || '') + '"></label>' +
     '<div style="color:var(--muted);font-size:12px">Session date: ' + (effDate(b) ? fmtLong(effDate(b)) : 'none') + '</div>' +
-    '<div style="font-weight:600;margin:10px 0 4px">Links</div>' +
+    '<div style="font-weight:600;margin:10px 0 4px">Links and place</div>' +
     '<label>Link to <select id="pLink"><option value="">choose…</option>' + folderOptions(new Set(liveLinks(b).map(l => l.folder))) + '</select></label>' +
-    '<div class="btns"><button id="pClear">Clear dates</button><button id="pDone" class="primary">Done</button></div>';
+    '<label>Move to <select id="pMove"><option value="">choose…</option>' + moveOptions(b.containerId) + '</select></label>' +
+    '<div class="btns"><button id="pDel" class="danger">Delete' + (sub ? ' (+' + plural(sub, 'sub-bullet') + ')' : '') + '</button>' +
+    '<span style="flex:1"></span><button id="pClear">Clear dates</button><button id="pDone" class="primary">Done</button></div>';
   placePop(e.clientX, e.clientY);
   let snapped = false;
   const apply = () => {
@@ -1173,6 +1354,8 @@ content.addEventListener('contextmenu', e => {
   };
   $('#pStart').onchange = apply; $('#pEnd').onchange = apply;
   $('#pLink').onchange = () => { const v = $('#pLink').value; if (!v) return; snap(); addLink(b, v); save(); closePop(); renderAll(); };
+  $('#pMove').onchange = () => { const v = $('#pMove').value; if (!v) return; popFor = null; closePop(); moveToContainer([b.id], v); };
+  $('#pDel').onclick = () => { popFor = null; closePop(); deleteItems([b.id]); };
   $('#pClear').onclick = () => { $('#pStart').value = ''; $('#pEnd').value = ''; apply(); closePop(); };
   $('#pDone').onclick = closePop;
 });
@@ -1185,19 +1368,34 @@ document.addEventListener('keydown', e => {
   if (mod && !inField && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) { e.preventDefault(); undo(); }
   else if (mod && !inField && (e.key === 'y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) { e.preventDefault(); redo(); }
 }, true);
+// Keys while a block is selected (no text has focus then).
+document.addEventListener('keydown', e => {
+  if (!bsel.size || pop.style.display === 'block') return;
+  const t = e.target; if (t.matches && t.matches('input, select, textarea, .tx')) return;
+  if (e.key === 'Escape') { clearSel(); return; }
+  if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); deleteItems(selRoots()); return; }
+  if (e.key === 'Tab') { e.preventDefault(); shiftBlock(e.shiftKey); return; }
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter') && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault(); const up = e.key === 'ArrowUp';
+    const ord = selectableIds().filter(id => bsel.has(id)); const id = up || e.key === 'Enter' ? ord[0] : ord[ord.length - 1];
+    clearSel(); if (id) refocus({ id, pos: up ? 0 : 'end' });
+  }
+});
 
 /* ---------- drag and drop ---------- */
 let drag = null, dropAt = null;
 function clearDropMarks() { document.querySelectorAll('.drop,.drop-before,.drop-after,.drop-child').forEach(n => n.classList.remove('drop', 'drop-before', 'drop-after', 'drop-child')); }
 function isDesc(t, ancestorId) { let x = t; while (x) { if (x.id === ancestorId) return true; x = x.parentId ? S.bullets[x.parentId] : null; } return false; }
-function setContainerDeep(b, cid) { b.containerId = cid; for (const k of Object.values(S.bullets)) if (k.parentId === b.id) setContainerDeep(k, cid); }
 function flashFolder(fid) { const it = document.querySelector('.item.folder[data-fid="' + fid + '"]'); if (it) it.classList.add('flash'); }
 document.addEventListener('dragstart', e => {
   const t = e.target.nodeType === 1 ? e.target : e.target.parentElement;
   const tw = t.closest('.tw[draggable="true"]'), grip = t.closest('.grip'), fi = t.closest('.item.folder');
   if (tw) {
-    const b = bulletOf(tw); drag = { type: 'bullet', id: b.id };
-    e.dataTransfer.setData('text/plain', b.text || ''); e.dataTransfer.effectAllowed = 'all';
+    const b = bulletOf(tw);
+    const ids = bsel.has(b.id) && bsel.size > 1 ? selRoots() : [b.id];
+    if (!bsel.has(b.id)) clearSel();
+    drag = { type: 'bullet', ids };
+    e.dataTransfer.setData('text/plain', ids.length > 1 ? plural(ids.length, 'item') : (b.text || '')); e.dataTransfer.effectAllowed = 'all';
     try { e.dataTransfer.setDragImage(tw.closest('.row'), 12, 11); } catch (_) {}
   } else if (grip && S.ui.current) {
     drag = { type: 'container', id: S.ui.current }; e.dataTransfer.setData('text/plain', S.containers[S.ui.current].title || ''); e.dataTransfer.effectAllowed = 'all';
@@ -1215,23 +1413,25 @@ const lists = $('#lists');
 lists.addEventListener('dragover', e => {
   if (!drag) return;
   clearDropMarks();
-  const fi = e.target.closest('.item.folder'), hdr = e.target.closest('.fsec');
+  const fi = e.target.closest('.item.folder'), hdr = e.target.closest('.fsec'), ci = e.target.closest('.item[data-cid]');
   if (fi && canDropOnFolder(fi.dataset.fid)) { e.preventDefault(); e.dataTransfer.dropEffect = drag.type === 'folder' ? 'move' : 'link'; fi.classList.add('drop'); }
+  else if (ci && drag.type === 'bullet') { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; ci.classList.add('drop'); }
   else if (hdr && drag.type === 'folder' && S.folders[drag.id] && S.folders[drag.id].kind === hdr.dataset.kind) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; hdr.classList.add('drop'); }
 });
 lists.addEventListener('dragleave', e => { if (!lists.contains(e.relatedTarget)) clearDropMarks(); });
 lists.addEventListener('drop', e => {
   if (!drag) return;
   e.preventDefault(); clearDropMarks();
-  const fi = e.target.closest('.item.folder'), hdr = e.target.closest('.fsec');
+  const fi = e.target.closest('.item.folder'), hdr = e.target.closest('.fsec'), ci = e.target.closest('.item[data-cid]');
   const f = focusInfo();
   if (fi && canDropOnFolder(fi.dataset.fid)) {
     const fid = fi.dataset.fid;
-    if (drag.type === 'bullet') { const b = S.bullets[drag.id]; if (!b) return; snap(); if (!addLink(b, fid)) setStatus(folderName(fid) + ' is already linked'); }
-    else if (drag.type === 'container') { const c = S.containers[drag.id]; snap(); if (!addLink(c, fid)) setStatus(folderName(fid) + ' is already linked'); }
+    if (drag.type === 'bullet') { const ids = drag.ids; drag = null; linkItems(ids, fid); refocus(f); return; }
+    if (drag.type === 'container') { const c = S.containers[drag.id]; snap(); if (!addLink(c, fid)) setStatus(folderName(fid) + ' is already linked'); }
     else if (drag.type === 'folder') { snap(); S.folders[drag.id].parentId = fid; S.folders[fid].collapsed = false; }
     save(); renderAll(); refocus(f); flashFolder(fid);
-  } else if (hdr && drag.type === 'folder') { snap(); S.folders[drag.id].parentId = null; save(); renderAll(); refocus(f); }
+  } else if (ci && drag.type === 'bullet') { const ids = drag.ids; drag = null; moveToContainer(ids, ci.dataset.cid); return; }
+  else if (hdr && drag.type === 'folder') { snap(); S.folders[drag.id].parentId = null; save(); renderAll(); refocus(f); }
   drag = null;
 });
 function dropZone(row, t, e) {
@@ -1247,8 +1447,8 @@ content.addEventListener('dragover', e => {
   clearDropMarks(); dropAt = null; e.dataTransfer.dropEffect = 'none';
   if (drag.type !== 'bullet') return;
   const row = e.target.closest('.outline .row'); if (!row) return;
-  const t = bulletOf(row), b = S.bullets[drag.id];
-  if (!t || !b || isDesc(t, b.id)) return;
+  const t = bulletOf(row);
+  if (!t || drag.ids.some(id => !S.bullets[id] || isDesc(t, id))) return;
   const zone = dropZone(row, t, e);
   row.classList.add('drop-' + zone); dropAt = { t: t.id, zone }; e.dataTransfer.dropEffect = 'move';
 });
@@ -1256,19 +1456,17 @@ content.addEventListener('drop', e => {
   if (!drag) return;
   e.preventDefault(); clearDropMarks();
   if (drag.type !== 'bullet' || !dropAt) { drag = null; return; }
-  const b = S.bullets[drag.id], t = S.bullets[dropAt.t]; drag = null; if (!b || !t) return;
+  const ids = drag.ids.filter(id => S.bullets[id]), t = S.bullets[dropAt.t]; drag = null;
+  if (!ids.length || !t) { dropAt = null; return; }
   snap();
-  const cid = t.containerId;
-  if (dropAt.zone === 'child') { b.parentId = t.id; b.order = orderFirst(t.id, cid); t.collapsed = false; }
+  const cid = t.containerId, moving = new Set(ids);
+  if (dropAt.zone === 'child') { t.collapsed = false; placeAt(ids, t.id, cid, 0); }
   else {
-    const sib = childList(t.parentId, cid).filter(x => x.id !== b.id), i = sib.indexOf(t);
-    const nb = dropAt.zone === 'before' ? sib[i - 1] : sib[i + 1];
-    b.parentId = t.parentId;
-    b.order = dropAt.zone === 'before' ? (nb ? (nb.order + t.order) / 2 : t.order - 1) : (nb ? (nb.order + t.order) / 2 : t.order + 1);
+    const sib = childList(t.parentId, cid).filter(x => !moving.has(x.id));
+    placeAt(ids, t.parentId, cid, sib.indexOf(t) + (dropAt.zone === 'after' ? 1 : 0));
   }
-  if (b.containerId !== cid) setContainerDeep(b, cid);
   dropAt = null;
-  commit(b.id, 'end');
+  if (ids.length === 1) { bsel.clear(); commit(ids[0], 'end'); } else { save(); renderAll(); }
 });
 lists.addEventListener('contextmenu', e => {
   const fi = e.target.closest('.item.folder'); if (!fi) return;
@@ -1291,6 +1489,7 @@ $('#newMeeting').onclick = () => createContainer('meeting');
 $('#newDoc').onclick = () => createContainer('document');
 $('#filter').addEventListener('input', renderSidebar);
 $('#themeBtn').onclick = () => { const order = [null, 'light', 'dark']; S.ui.theme = order[(order.indexOf(S.ui.theme || null) + 1) % 3]; save(); applyTheme(); };
+$('#toastUndo').onclick = () => { hideToast(); undo(); };
 
 function exportData() {
   const data = JSON.stringify({ app: 'ecco-pim', version: 2, exportedAt: new Date().toISOString(), containers: S.containers, bullets: S.bullets, folders: S.folders }, null, 1);
