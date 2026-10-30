@@ -180,6 +180,7 @@ body.sweeping,body.sweeping *{-webkit-user-select:none!important;user-select:non
     <button id="exportBtn" title="Download a complete backup file">Export</button>
     <button id="importBtn" title="Restore from a backup file">Import</button>
     <button id="themeBtn" title="Theme">Theme: system</button>
+    <button id="reloadBtn" title="Reload the page, e.g. after uploading a new version">↻ Refresh</button>
     <span id="status">Saved</span>
     <button id="syncBtn" hidden></button>
     <button id="confBtn" hidden title="Edits that a newer edit replaced; restore or dismiss them"></button>
@@ -1723,6 +1724,8 @@ $('#homeBtn').onclick = () => { // Home: the start screen for now; becomes the T
   bsel.clear(); selAnchor = selFocus = null;
   S.ui.current = null; S.ui.folder = null; save(); renderAll(); $('#main').scrollTop = 0;
 };
+$('#reloadBtn').textContent = '↻ Refresh (' + (isMac ? '⌘R' : 'Ctrl+R') + ')';
+$('#reloadBtn').onclick = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); stamp(); } catch (e) {} location.reload(); };
 $('#newMeeting').onclick = () => createContainer('meeting');
 $('#newDoc').onclick = () => createContainer('document');
 $('#filter').addEventListener('input', renderSidebar);

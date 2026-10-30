@@ -19,7 +19,8 @@ self.addEventListener('fetch', e => {
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const cached = () => cache.match(req, { ignoreSearch: true }).then(m => m || cache.match('./index.html'));
-    const net = fetch(req).then(res => { if (res.ok) cache.put(req, res.clone()); return res; });
+    // no-cache: ask GitHub whether the page changed, so a refresh right after an upload shows the new version
+    const net = fetch(new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' })).then(res => { if (res.ok) cache.put(req, res.clone()); return res; });
     net.catch(() => {});
     try {
       return await Promise.race([net, new Promise((_, reject) => setTimeout(() => reject(new Error('slow')), 5000))]);
