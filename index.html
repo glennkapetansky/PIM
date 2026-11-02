@@ -171,6 +171,47 @@ input[type="checkbox"]{accent-color:var(--accent)}
 #toast button{color:inherit;border-color:currentColor;padding:1px 10px}
 #toast button:hover{background:transparent;opacity:.8}
 
+/* Sidebar views (Today, Calendar, Search) */
+.item.nav .t::before{display:none}
+.item.nav .ic{width:14px;flex:0 0 14px;text-align:center;color:var(--muted)}
+.item .cnt.late{background:var(--err);color:var(--bg)}
+.pill.late{background:transparent;color:var(--err);border:1px solid currentColor;line-height:15px}
+
+/* Day view and calendar */
+.dtitle{font-size:20px;font-weight:650;padding:2px 0}
+.dnav{display:inline-flex;gap:4px;align-items:center}
+.dnav button{padding:0 8px}
+.vsec.late{color:var(--err)}
+.vlink .k{width:7px;height:7px;border-radius:50%;flex:0 0 7px;align-self:center;background:var(--doc)}
+.vlink .k.meeting{background:var(--session)} .vlink .k.inbox{background:var(--per)}
+.vlink .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-left:1px solid var(--line);border-top:1px solid var(--line);max-width:1400px;-webkit-user-select:none;user-select:none}
+.cal .wd{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600;padding:3px 6px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--panel)}
+.cal .cell{min-height:104px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:2px 4px 4px;cursor:pointer;min-width:0}
+.cal .cell:hover{background:var(--hover)}
+.cal .cell.out{background:var(--panel)}
+.cal .cell.out .dn{color:var(--faint)}
+.cal .dn{font-size:12px;color:var(--muted);font-weight:600;display:inline-block;padding:0 5px;border-radius:9px;margin-bottom:1px}
+.cal .cell.today .dn{background:var(--accent);color:var(--bg)}
+.cal .ev{font-size:12px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:3px;padding:0 3px}
+.cal .ev:hover{background:var(--accent-bg)}
+.cal .ev.s{color:var(--session);font-weight:600}
+.cal .ev.s::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--session);margin-right:4px;vertical-align:1px}
+.cal .ev.late{color:var(--err)}
+.cal .ev.d{color:var(--done);text-decoration:line-through}
+.cal .more{font-size:11.5px;color:var(--muted);padding:0 3px}
+.cal .more:hover{color:var(--accent);text-decoration:underline}
+
+/* Search */
+.sbox{width:100%;max-width:1100px;font-size:16px;padding:5px 10px;border-radius:7px}
+.sopts{display:flex;gap:14px;align-items:center;color:var(--muted);font-size:12.5px;margin:6px 0 4px;max-width:1100px}
+.sopts label{display:flex;gap:5px;align-items:center;cursor:pointer}
+.shits{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:4px 0}
+.shits .lab{color:var(--muted);font-size:12.5px;margin-right:2px}
+.shits .doc{background:var(--pill);color:var(--text)} .shits .meeting{background:var(--session-bg);color:var(--session)}
+.sres .row .tx:not(:focus){display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+::highlight(srch){background-color:var(--warn-bg);color:var(--warn)}
+
 /* Empty state */
 .welcome{max-width:620px;color:var(--muted);margin-top:40px}
 .welcome h2{color:var(--text);font-size:18px;margin:0 0 8px}
@@ -514,6 +555,19 @@ function effDate(b) {
   if (b.created) return isoOf(new Date(b.created));
   const c = S.containers[b.containerId]; return c ? c.created : null;
 }
+/* Dates of an item, for Today and the calendar. start+end = a range; start only ("from") = open-ended,
+   active from its start until checked; end only ("by") = a due date on that one day. */
+const dayOf = ts => isoOf(new Date(ts));
+const addDays = (s, n) => { const d = parseISO(s); d.setDate(d.getDate() + n); return isoOf(d); };
+function spanOf(b) { if (!b.start && !b.end) return null; return { s: b.start || b.end, e: b.end || (b.start ? '9999-12-31' : b.end) }; }
+const onDay = (b, d) => { const r = spanOf(b); return !!r && r.s <= d && d <= r.e; };
+const isLate = b => !b.done && !!b.end && b.end < todayISO();
+// Keep only items with no ancestor in the same list: a listed child shows inside its listed parent.
+function topOnly(list) {
+  const ids = new Set(list.map(r => r.b.id));
+  return list.filter(r => { let p = r.b.parentId ? S.bullets[r.b.parentId] : null; while (p) { if (ids.has(p.id)) return false; p = p.parentId ? S.bullets[p.parentId] : null; } return true; });
+}
+const liveItems = () => Object.values(S.bullets).filter(b => !b.isSession && S.containers[b.containerId] && (b.text || '').trim());
 function setContainerDeep(b, cid) { b.containerId = cid; for (const k of Object.values(S.bullets)) if (k.parentId === b.id) setContainerDeep(k, cid); }
 // Put bullets ids (in order) under parentId at sibling index k (counted without the moved ones).
 function placeAt(ids, parentId, cid, k) {
@@ -885,6 +939,23 @@ function renderSidebar() {
     it.onclick = () => openContainer(c.id);
     lists.appendChild(it);
   }
+  { // views
+    const v = curView(), tc = todayCount();
+    const navs = [['today', '◷', 'Today', v === 'today' && !(S.ui.day && S.ui.day !== todayISO())],
+      ['calendar', '▦', 'Calendar', v === 'calendar' || (v === 'today' && S.ui.day && S.ui.day !== todayISO())],
+      ['search', '⌕', 'Search', v === 'search']];
+    for (const [id, ic, label, cur] of navs) {
+      const it = el('div', 'item nav' + (cur ? ' cur' : '')); it.dataset.view = id;
+      const i = el('span', 'ic'); i.textContent = ic;
+      const t = el('span', 't'); t.textContent = label;
+      it.append(i, t);
+      if (id === 'today' && tc.n) { const d = el('span', 'cnt' + (tc.late ? ' late' : '')); d.textContent = tc.n; d.title = plural(tc.n, 'item') + ' active today' + (tc.late ? ', ' + tc.late + ' overdue' : ''); it.appendChild(d); }
+      if (id === 'search') it.title = 'Search all notes (' + (isMac ? '⌘K' : 'Ctrl+K') + ')';
+      it.onclick = id === 'search' ? () => { goView('search'); const b = $('#srchQ'); if (b) { b.focus(); b.select(); } }
+        : () => goView(id, id === 'today' ? { day: null } : { month: null });
+      lists.appendChild(it);
+    }
+  }
   for (const kind of ['person', 'project']) {
     const h = el('div', 'sec fsec'); h.dataset.kind = kind;
     const lab = el('span'); lab.textContent = KIND_LABEL[kind];
@@ -954,16 +1025,17 @@ function metaHTML(b, kidCount) {
   for (const l of sortedLinks(b)) if (l.folder !== S.ui.folder) parts.push(tagHTML(l));
   if (b.start || b.end) {
     const r = b.start && b.end ? (b.start === b.end ? fmt(b.start) : fmt(b.start) + ' – ' + fmt(b.end)) : (b.start ? 'from ' + fmt(b.start) : 'by ' + fmt(b.end));
-    parts.push('<span class="pill" title="Right-click to change dates">' + r + '</span>');
+    const late = isLate(b);
+    parts.push('<span class="pill' + (late ? ' late' : '') + '" title="' + (late ? 'Overdue · ' : '') + 'Right-click to change dates">' + r + '</span>');
   }
   if (b.done && b.doneAt) parts.push('<span title="Completed ' + esc(new Date(b.doneAt).toLocaleString()) + '">✓ ' + fmt(isoOf(new Date(b.doneAt))) + '</span>');
   if (b.collapsed && kidCount) parts.push('<span>(' + kidCount + ')</span>');
   return parts.join('');
 }
 
-function nodeEl(b, idx) {
-  const kids = idx.get(b.id) || [];
-  const n = el('div', 'node'); n.dataset.id = b.id;
+function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted (Today lists each dated item once)
+  const allKids = idx.get(b.id) || [], kids = flat ? [] : allKids;
+  const n = el('div', 'node'); n.dataset.id = b.id; if (flat) n.dataset.flat = '1';
   const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : '') + (bsel.has(b.id) ? ' sel' : ''));
   const tw = el('span', 'tw');
   if (kids.length) { tw.textContent = b.collapsed ? '▸' : '▾'; tw.classList.add('has'); tw.title = 'Click: collapse / expand (Ctrl+.)'; }
@@ -981,7 +1053,7 @@ function nodeEl(b, idx) {
   tx.dataset.ph = b.isSession ? 'Session topic (optional)' : '';
   tx.innerHTML = linkify(b.text);
   row.appendChild(tx);
-  const meta = el('span', 'meta'); meta.innerHTML = metaHTML(b, kids.length); row.appendChild(meta);
+  const meta = el('span', 'meta'); meta.innerHTML = metaHTML(b, kids.length) + (flat && allKids.length ? '<span title="Sub-bullets; open the note to see them">(+' + allKids.length + ')</span>' : ''); row.appendChild(meta);
   n.appendChild(row);
   if (kids.length && !b.collapsed) { const k = el('div', 'kids'); for (const c of kids) k.appendChild(nodeEl(c, idx)); n.appendChild(k); }
   return n;
@@ -994,10 +1066,19 @@ function openItems(c) {
 }
 
 function renderMain() {
-  const ct = $('#content'); ct.innerHTML = '';
+  const ct = $('#content');
+  const a = document.activeElement, sq = a && a.id === 'srchQ' ? [a.selectionStart, a.selectionEnd] : null; // keep typing in Search across redraws
+  ct.innerHTML = ''; clearHighlight();
   if (S.ui.folder && S.folders[S.ui.folder]) { renderFolder(ct, S.folders[S.ui.folder]); return; }
   const c = S.ui.current && S.containers[S.ui.current];
-  if (!c) { ct.appendChild(welcome()); return; }
+  if (!c) {
+    S.ui.current = null;
+    const v = curView();
+    if (v === 'calendar') renderCalendar(ct);
+    else if (v === 'search') { renderSearch(ct, false); if (sq) { const b = $('#srchQ'); b.focus(); b.setSelectionRange(sq[0], sq[1]); } }
+    else renderDay(ct);
+    return;
+  }
 
   const head = el('div', 'head');
   const title = el('input', 'title'); title.value = c.title || ''; title.placeholder = c.type === 'meeting' ? 'Meeting title' : 'Document title';
@@ -1135,30 +1216,9 @@ function renderFolder(ct, f) {
   const done = roots.filter(r => r.b.done).sort((a, b) => (b.b.doneAt || '').localeCompare(a.b.doneAt || ''));
   const D = folderDesc(f.id);
   const linked = Object.values(S.containers).filter(c => c.type !== 'inbox' && (liveLinks(c).some(l => D.has(l.folder)) || sessionsOf(c.id).some(s => liveLinks(s).some(l => D.has(l.folder)))));
-  const idxCache = new Map(); const idxOf = cid => { if (!idxCache.has(cid)) idxCache.set(cid, kidsIndex(cid)); return idxCache.get(cid); };
 
-  function header(key, label, n, collapsible, defOpen) {
-    const isOpen = collapsible ? (viewOpen[f.id + key] !== undefined ? viewOpen[f.id + key] : defOpen) : true;
-    const h = el('div', 'vsec' + (collapsible ? ' tog' : ''));
-    h.textContent = (collapsible ? (isOpen ? '▾ ' : '▸ ') : '') + label + ' ';
-    const c = el('span', 'n'); c.textContent = '(' + n + ')'; h.appendChild(c);
-    if (collapsible) h.onclick = () => { viewOpen[f.id + key] = !isOpen; renderMain(); };
-    ct.appendChild(h);
-    return isOpen;
-  }
-  function items(list, dim) {
-    const g = el('div', 'outline vgroup' + (dim ? ' dim' : ''));
-    let lastSrc = null;
-    for (const r of list) {
-      const lab = srcLabel(r.b);
-      if (lab !== lastSrc) {
-        const s = el('div', 'src'); s.textContent = lab + (r.inherited ? ' · via project' : '');
-        s.title = 'Open where this was written'; s.onclick = () => goToSource(r.b); g.appendChild(s); lastSrc = lab;
-      }
-      const n = nodeEl(r.b, idxOf(r.b.containerId)); n.dataset.root = '1'; g.appendChild(n);
-    }
-    ct.appendChild(g);
-  }
+  const header = (key, label, n, collapsible, defOpen) => vHeader(ct, f.id + key, label, n, collapsible, defOpen);
+  const items = (list, dim) => vItems(ct, list, dim);
 
   header('open', f.id === 'me' ? 'To-Do' : 'Open', pri.length, false);
   if (pri.length) items(pri, false);
@@ -1181,6 +1241,260 @@ function renderFolder(ct, f) {
     ct.appendChild(box);
   }
   if (header('done', 'Done', done.length, true, false) && done.length) items(done, false);
+}
+
+/* Shared pieces of the gathered views (person/project, Today, Search): a section header that can
+   collapse, and a list of items, each under a faint line naming where it was written. */
+function vHeader(ct, key, label, n, collapsible, defOpen, cls) {
+  const isOpen = collapsible ? (viewOpen[key] !== undefined ? viewOpen[key] : defOpen) : true;
+  const h = el('div', 'vsec' + (collapsible ? ' tog' : '') + (cls ? ' ' + cls : ''));
+  h.textContent = (collapsible ? (isOpen ? '▾ ' : '▸ ') : '') + label + ' ';
+  if (n != null) { const c = el('span', 'n'); c.textContent = '(' + n + ')'; h.appendChild(c); }
+  if (collapsible) h.onclick = () => { viewOpen[key] = !isOpen; renderMain(); };
+  ct.appendChild(h);
+  return isOpen;
+}
+function vItems(ct, list, dim, flat) {
+  const g = el('div', 'outline vgroup' + (dim ? ' dim' : ''));
+  const idxCache = new Map(), idxOf = cid => { if (!idxCache.has(cid)) idxCache.set(cid, kidsIndex(cid)); return idxCache.get(cid); };
+  let lastSrc = null;
+  for (const r of list) {
+    const lab = srcLabel(r.b);
+    if (lab !== lastSrc) {
+      const s = el('div', 'src'); s.textContent = lab + (r.inherited ? ' · via project' : '');
+      s.title = 'Open where this was written'; s.onclick = () => goToSource(r.b); g.appendChild(s); lastSrc = lab;
+    }
+    const n = nodeEl(r.b, idxOf(r.b.containerId), flat); n.dataset.root = '1'; g.appendChild(n);
+  }
+  ct.appendChild(g);
+  return g;
+}
+function vEmpty(ct, text) { const e = el('div', 'vempty'); e.textContent = text; ct.appendChild(e); }
+
+/* ---------- views: Today (any day), Calendar, Search ---------- */
+function goView(view, opts) {
+  if (S.ui.current) cleanupEmptySession(S.ui.current);
+  bsel.clear(); selAnchor = selFocus = null;
+  S.ui.current = null; S.ui.folder = null; S.ui.view = view;
+  Object.assign(S.ui, opts || {});
+  save(); renderAll(); $('#main').scrollTop = 0;
+}
+const curView = () => (S.ui.current || S.ui.folder) ? null : (S.ui.view || 'today');
+function todayCount() { // overdue + active today, for the sidebar badge
+  const t = todayISO(); let n = 0, late = 0;
+  for (const b of Object.values(S.bullets)) {
+    if (b.isSession || b.done || (!b.start && !b.end) || !S.containers[b.containerId] || !(b.text || '').trim()) continue;
+    if (isLate(b)) { n++; late++; } else if (onDay(b, t)) n++;
+  }
+  return { n, late };
+}
+function dayLog(d) { // meetings, documents and folders where something was written on day d
+  const out = new Map(), get = cid => { if (!out.has(cid)) out.set(cid, { c: S.containers[cid], sess: [], n: 0 }); return out.get(cid); };
+  for (const b of Object.values(S.bullets)) {
+    if (!S.containers[b.containerId]) continue;
+    if (b.isSession) { if (b.date === d && !treeEmpty(b.id)) get(b.containerId).sess.push(b); continue; }
+    if (!(b.text || '').trim()) continue;
+    const m = M['b:' + b.id];
+    if ((b.created && dayOf(b.created) === d) || (m && m.mt > 1 && !m.del && dayOf(m.mt) === d)) get(b.containerId).n++;
+  }
+  return [...out.values()].sort((a, b) => (b.sess.length - a.sess.length) || (a.c.title || '').localeCompare(b.c.title || ''));
+}
+function logRow(box, x, d) {
+  const c = x.c, r = el('div', 'vlink');
+  const k = el('span', 'k ' + c.type), t = el('span', 't'), dd = el('span', 'd');
+  t.textContent = c.type === 'inbox' ? 'Added under ' + folderName(c.folderId) : (c.title || 'Untitled');
+  const topic = x.sess.map(s => (s.text || '').trim()).filter(Boolean).join(', ');
+  dd.textContent = [c.type === 'meeting' ? 'Meeting' + (x.sess.length ? ' · session' + (topic ? ': ' + topic : '') : '') : c.type === 'document' ? 'Document' : 'Person or project',
+    x.n ? plural(x.n, 'note') + ' written or edited' : ''].filter(Boolean).join(' · ');
+  r.append(k, t, dd);
+  r.title = 'Open';
+  r.onclick = () => {
+    if (c.type === 'inbox') { openFolder(c.folderId); return; }
+    openContainer(c.id);
+    if (x.sess.length && d !== todayISO()) { const s = x.sess[0]; s.collapsed = false; reveal(s.id); }
+  };
+  box.appendChild(r);
+}
+function renderDay(ct) {
+  const today = todayISO(), d = S.ui.day && S.ui.day !== today ? S.ui.day : today, isToday = d === today;
+  const head = el('div', 'head');
+  const tt = el('div', 'dtitle'); tt.textContent = isToday ? 'Today' : parseISO(d).toLocaleDateString(undefined, { weekday: 'long' });
+  head.appendChild(tt);
+  const sub = el('div', 'sub');
+  const ds = el('span'); ds.textContent = parseISO(d).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const nav = el('span', 'dnav');
+  const mk = (txt, title, fn) => { const b = el('button'); b.textContent = txt; b.title = title; b.onclick = fn; return b; };
+  nav.append(mk('‹', 'Previous day', () => goView('today', { day: addDays(d, -1) })));
+  if (!isToday) nav.append(mk('Today', 'Back to today', () => goView('today', { day: null })));
+  nav.append(mk('›', 'Next day', () => goView('today', { day: addDays(d, 1) })));
+  const cal = el('button', 'go'); cal.textContent = 'Month view'; cal.onclick = () => goView('calendar', { month: d.slice(0, 7) });
+  sub.append(ds, nav, cal);
+  head.appendChild(sub); ct.appendChild(head);
+
+  const all = liveItems(), dated = all.filter(b => b.start || b.end);
+  const k = 'day:';
+  if (isToday) {
+    const late = (dated.filter(isLate).map(b => ({ b }))).sort((a, b) => a.b.end.localeCompare(b.b.end));
+    const now = (dated.filter(b => !b.done && !isLate(b) && onDay(b, d)).map(b => ({ b }))).sort((a, b) => spanOf(a.b).e.localeCompare(spanOf(b.b).e));
+    const end7 = addDays(d, 7);
+    const soon = (dated.filter(b => !b.done && spanOf(b).s > d && spanOf(b).s <= end7).map(b => ({ b }))).sort((a, b) => spanOf(a.b).s.localeCompare(spanOf(b.b).s));
+    if (late.length) { vHeader(ct, k + 'late', 'Overdue', late.length, false, true, 'late'); vItems(ct, late, false, true); }
+    vHeader(ct, k + 'now', 'Active today', now.length, false);
+    if (now.length) vItems(ct, now, false, true);
+    else vEmpty(ct, 'Nothing scheduled for today. An item shows here while today falls between its start and end dates, or on its due date. Right-click a bullet to give it dates.');
+    if (soon.length && vHeader(ct, k + 'soon', 'Next 7 days', soon.length, true, true)) vItems(ct, soon, false, true);
+  } else {
+    const on = (dated.filter(b => onDay(b, d) && !(spanOf(b).e === '9999-12-31' && spanOf(b).s < d)).map(b => ({ b })))
+      .sort((a, b) => (a.b.done - b.b.done) || spanOf(a.b).s.localeCompare(spanOf(b.b).s));
+    vHeader(ct, k + 'on', 'Scheduled', on.length, false);
+    if (on.length) vItems(ct, on, false, true); else vEmpty(ct, 'No items start, end or fall due on this day.');
+  }
+  const log = dayLog(d);
+  if (vHeader(ct, k + 'log', isToday ? 'Written today' : 'Written this day', log.length, true, true)) {
+    const box = el('div', 'outline');
+    if (!log.length) { const e = el('div', 'vempty'); e.textContent = isToday ? 'Nothing yet. Meetings and documents you write in today are listed here.' : 'No sessions or notes from this day.'; box.appendChild(e); }
+    for (const x of log) logRow(box, x, d);
+    ct.appendChild(box);
+  }
+  const done = (all.filter(b => b.done && b.doneAt && dayOf(b.doneAt) === d).map(b => ({ b }))).sort((a, b) => b.b.doneAt.localeCompare(a.b.doneAt));
+  if (done.length && vHeader(ct, k + 'done', 'Completed', done.length, true, !isToday)) vItems(ct, done, false, true);
+  if (isToday) {
+    const n = openCount('me'), r = el('div', 'vlink'); r.style.marginTop = '14px';
+    const kk = el('span', 'k inbox'), t = el('span', 't'), dd = el('span', 'd');
+    t.textContent = 'Me (To-Do)'; dd.textContent = n ? plural(n, 'open item') + ', dated or not' : 'nothing open';
+    r.append(kk, t, dd); r.onclick = () => openFolder('me'); ct.appendChild(r);
+  }
+  if (!Object.values(S.containers).some(c => c.type !== 'inbox')) ct.appendChild(welcome());
+}
+
+function renderCalendar(ct) {
+  const today = todayISO(), mon = /^\d{4}-\d{2}$/.test(S.ui.month || '') ? S.ui.month : today.slice(0, 7);
+  const first = parseISO(mon + '-01'), y = first.getFullYear(), m = first.getMonth();
+  const head = el('div', 'head');
+  const tt = el('div', 'dtitle'); tt.textContent = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  head.appendChild(tt);
+  const sub = el('div', 'sub');
+  const shift = n => isoOf(new Date(y, m + n, 1)).slice(0, 7);
+  const nav = el('span', 'dnav');
+  const mk = (txt, title, fn) => { const b = el('button'); b.textContent = txt; b.title = title; b.onclick = fn; return b; };
+  nav.append(mk('‹', 'Previous month', () => goView('calendar', { month: shift(-1) })));
+  if (mon !== today.slice(0, 7)) nav.append(mk('This month', 'Back to this month', () => goView('calendar', { month: null })));
+  nav.append(mk('›', 'Next month', () => goView('calendar', { month: shift(1) })));
+  const key = el('span'); key.textContent = 'Meeting sessions in purple · items on their start, end or due date · completions struck through · click a day for all of it';
+  sub.append(nav, key); head.appendChild(sub); ct.appendChild(head);
+
+  const start = new Date(y, m, 1 - first.getDay()), days = [];
+  for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); days.push(isoOf(d)); }
+  while (days.length > 35 && days[days.length - 7].slice(0, 7) !== mon) days.splice(days.length - 7, 7);
+  const lo = days[0], hi = days[days.length - 1], ev = {};
+  const put = (d, e) => { if (d >= lo && d <= hi) (ev[d] = ev[d] || []).push(e); };
+  for (const b of Object.values(S.bullets)) {
+    const c = S.containers[b.containerId]; if (!c) continue;
+    if (b.isSession) { if (!treeEmpty(b.id)) put(b.date, { k: 's', o: 0, b, text: (c.title || 'Untitled') + ((b.text || '').trim() ? ' · ' + b.text.trim() : '') }); continue; }
+    if (!(b.text || '').trim()) continue;
+    if (b.start || b.end) {
+      const late = isLate(b);
+      if (b.start && b.end && b.start !== b.end) { put(b.start, { k: 'i', o: 1, b, pre: '▸ ', tip: 'Starts', late }); put(b.end, { k: 'i', o: 1, b, pre: '◂ ', tip: 'Ends', late }); }
+      else if (b.start && !b.end) put(b.start, { k: 'i', o: 1, b, pre: '▸ ', tip: 'From', late });
+      else put(b.end || b.start, { k: 'i', o: 1, b, pre: '• ', tip: 'Due', late });
+    }
+    if (b.done && b.doneAt) put(dayOf(b.doneAt), { k: 'd', o: 2, b, pre: '✓ ', tip: 'Completed' });
+  }
+  const grid = el('div', 'cal');
+  for (let i = 0; i < 7; i++) { const w = el('div', 'wd'); w.textContent = parseISO(days[i]).toLocaleDateString(undefined, { weekday: 'short' }); grid.appendChild(w); }
+  const MAX = 4;
+  for (const d of days) {
+    const cell = el('div', 'cell' + (d.slice(0, 7) !== mon ? ' out' : '') + (d === today ? ' today' : ''));
+    cell.title = 'Open ' + fmtLong(d);
+    const dn = el('span', 'dn'); dn.textContent = parseISO(d).getDate(); cell.appendChild(dn);
+    const list = (ev[d] || []).sort((a, b) => a.o - b.o || (a.b.done - b.b.done));
+    for (const e of list.slice(0, list.length > MAX + 1 ? MAX : MAX + 1)) {
+      const x = el('div', 'ev ' + e.k + (e.late && e.k === 'i' ? ' late' : '') + (e.k === 'i' && e.b.done ? ' d' : ''));
+      x.textContent = (e.pre || '') + (e.text || e.b.text);
+      x.title = (e.tip ? e.tip + ': ' : '') + (e.text || e.b.text) + (e.k === 's' ? '' : '\n' + srcLabel(e.b)) + (e.late ? '\nOverdue' : '');
+      x.onclick = ev2 => {
+        ev2.stopPropagation();
+        if (e.k === 's') { openContainer(e.b.containerId); e.b.collapsed = false; reveal(e.b.id); }
+        else goToSource(e.b);
+      };
+      cell.appendChild(x);
+    }
+    if (list.length > MAX + 1) { const mo = el('div', 'more'); mo.textContent = '+' + (list.length - MAX) + ' more'; cell.appendChild(mo); }
+    cell.onclick = () => goView('today', { day: d === today ? null : d });
+    grid.appendChild(cell);
+  }
+  ct.appendChild(grid);
+}
+
+/* Search: every word must appear in the item's text, its people/project names, or where it was written
+   (meeting/document title, session topic), and at least one word in the item itself. Done items included. */
+let searchTimer = null, searchAll = false;
+function searchWords(q) { return q.toLowerCase().split(/\s+/).filter(Boolean); }
+// a word matches at the start of a word ("bo" finds "Bo" and "board", not "about")
+const wordRe = w => new RegExp('(?:^|[^\\p{L}\\p{N}])' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'iu');
+function runSearch(q) {
+  const words = searchWords(q).map(wordRe); if (!words.length) return [];
+  const hits = [];
+  for (const b of liveItems()) {
+    const own = (b.text + ' ' + liveLinks(b).map(l => folderName(l.folder)).join(' ')).toLowerCase();
+    if (!words.some(w => w.test(own))) continue;
+    const c = S.containers[b.containerId], s = sessionOf(b);
+    const ctx = ((c.type === 'inbox' ? folderName(c.folderId) : c.title || '') + ' ' + (s ? s.text || '' : '')).toLowerCase();
+    if (words.every(w => w.test(own) || w.test(ctx))) hits.push({ b });
+  }
+  return topOnly(hits).sort((a, b) => (effDate(b.b) || '').localeCompare(effDate(a.b) || '') || a.b.order - b.b.order);
+}
+function renderSearch(ct, focus) {
+  const head = el('div', 'head');
+  const tt = el('div', 'dtitle'); tt.textContent = 'Search'; head.appendChild(tt);
+  const box = el('input', 'sbox'); box.id = 'srchQ'; box.type = 'search'; box.autocomplete = 'off';
+  box.placeholder = 'Words in your notes, or a person or project name'; box.value = S.ui.q || '';
+  const opts = el('div', 'sopts');
+  const lab = el('label'), hd = el('input'); hd.type = 'checkbox'; hd.checked = !!S.ui.qHideDone;
+  lab.append(hd, 'Hide done items'); opts.appendChild(lab);
+  const cnt = el('span'); opts.appendChild(cnt);
+  head.append(box, opts); ct.appendChild(head);
+  const res = el('div', 'sres'); ct.appendChild(res);
+  const draw = () => {
+    res.innerHTML = ''; clearHighlight();
+    const q = (S.ui.q || '').trim();
+    if (!q) { cnt.textContent = ''; vEmpty(res, 'Type to search every note, open or done, in meetings, documents and people/project lists. A person or project name also finds the items linked to them.'); return; }
+    const words = searchWords(q), res2 = words.map(wordRe);
+    // titles that match: jump straight there
+    const tl = [];
+    for (const f of Object.values(S.folders)) if (res2.every(w => w.test(f.name || ''))) tl.push('<span class="tag ' + f.kind + '" data-of="' + f.id + '">' + esc(f.name || 'Untitled') + '</span>');
+    for (const c of Object.values(S.containers)) if (c.type !== 'inbox' && res2.every(w => w.test(c.title || ''))) tl.push('<span class="tag ' + (c.type === 'meeting' ? 'meeting' : 'doc') + '" data-oc="' + c.id + '">' + esc(c.title || 'Untitled') + '</span>');
+    if (tl.length) { const h = el('div', 'shits'); h.innerHTML = '<span class="lab">Open:</span>' + tl.join(''); res.appendChild(h); }
+    let list = runSearch(q);
+    const nDone = list.filter(r => r.b.done).length;
+    if (S.ui.qHideDone) list = list.filter(r => !r.b.done);
+    cnt.textContent = plural(list.length, 'item') + (S.ui.qHideDone ? (nDone ? ' · ' + nDone + ' done hidden' : '') : (nDone ? ' · ' + nDone + ' done' : ''));
+    if (!list.length) { vEmpty(res, 'No items match.'); return; }
+    const LIM = 150, shown = searchAll ? list : list.slice(0, LIM);
+    const g = vItems(res, shown);
+    if (list.length > shown.length) { const more = el('button'); more.textContent = 'Show all ' + list.length; more.style.marginTop = '10px'; more.onclick = () => { searchAll = true; draw(); }; res.appendChild(more); }
+    highlight(g, words);
+  };
+  res.addEventListener('click', e => {
+    const f = e.target.closest('[data-of]'), c = e.target.closest('[data-oc]');
+    if (f) { e.stopPropagation(); openFolder(f.dataset.of); } else if (c) { e.stopPropagation(); openContainer(c.dataset.oc); }
+  }, true);
+  box.addEventListener('input', () => { S.ui.q = box.value; searchAll = false; clearTimeout(searchTimer); searchTimer = setTimeout(() => { draw(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }, 150); });
+  box.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchTimer); draw(); } if (e.key === 'ArrowDown') { const t = res.querySelector('.tx'); if (t) { e.preventDefault(); t.focus(); setCaret(t, 'end'); } } });
+  hd.onchange = () => { S.ui.qHideDone = hd.checked; save(); draw(); };
+  draw();
+  if (focus) { box.focus(); box.select(); }
+}
+function clearHighlight() { try { if (window.CSS && CSS.highlights) CSS.highlights.delete('srch'); } catch (e) {} }
+function highlight(root, words) { // marks matches without touching the editable text (CSS Custom Highlight API; skipped where unsupported)
+  if (!(window.CSS && CSS.highlights && window.Highlight)) return;
+  const ranges = [], walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: n => n.parentElement.closest('.tx, .tag') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT });
+  let n;
+  while ((n = walker.nextNode())) {
+    const t = n.data.toLowerCase();
+    for (const w of words) { let i = t.indexOf(w); while (i >= 0) { if (i === 0 || !/[\p{L}\p{N}]/u.test(t[i - 1])) { const r = new Range(); r.setStart(n, i); r.setEnd(n, i + w.length); ranges.push(r); } i = t.indexOf(w, i + w.length); } }
+  }
+  if (ranges.length) CSS.highlights.set('srch', new Highlight(...ranges));
 }
 
 function welcome() {
@@ -1540,6 +1854,7 @@ content.addEventListener('keydown', e => {
   }
   if (e.key === 'Enter') {
     e.preventDefault();
+    if (t.closest('.node').dataset.flat) { toast('Add notes in the meeting or document itself: click the grey line above this item', false); return; }
     const pos = getCaret(t), text = t.textContent;
     snap();
     if (b.isSession) { b.collapsed = false; const nb = newBullet(cid, b.id, orderFirst(b.id, cid)); commit(nb.id, 0); return; }
@@ -1551,7 +1866,7 @@ content.addEventListener('keydown', e => {
     b.text = text.slice(0, pos);
     const after = text.slice(pos);
     const kids = childList(b.id, cid);
-    const nb = (kids.length && !b.collapsed)
+    const nb = (kids.length && !b.collapsed && !t.closest('.node').dataset.flat)
       ? newBullet(cid, b.id, orderFirst(b.id, cid), { text: after })
       : newBullet(cid, b.parentId, orderAfter(b), { text: after });
     inheritLinks(nb);
@@ -1579,7 +1894,20 @@ content.addEventListener('keydown', e => {
   }
   if (e.key === 'Tab') {
     e.preventDefault(); if (b.isSession) return;
-    if (isRoot) { toast('To indent, open the note where it was written (click the grey line above it). This view mixes notes from several places.', false); return; }
+    if (isRoot) {
+      if (e.shiftKey) { toast('Already at the top level', false); return; }
+      // in a person/project view, nest under the item shown just above when both were written in the same place
+      const roots = S.ui.folder ? [...content.querySelectorAll('.vgroup > .node[data-root]')] : [];
+      const i = roots.indexOf(t.closest('.node')), above = i > 0 ? S.bullets[roots[i - 1].dataset.id] : null;
+      if (above && above.containerId === cid) {
+        snap(); const pos = getCaret(t);
+        b.order = orderLast(above.id, cid); b.parentId = above.id; above.collapsed = false;
+        commit(b.id, pos); return;
+      }
+      toast(above ? 'The item above was written somewhere else (' + srcLabel(above) + '). Drag this item\'s dot onto it to nest it there; that moves it there.'
+                  : 'To indent, open the note where it was written (click the grey line above it).', false);
+      return;
+    }
     const pos = getCaret(t);
     if (e.shiftKey) {
       if (!b.parentId) return;
@@ -1763,6 +2091,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && pop.style.display === 'block') { closePop(); return; }
   const mod = e.ctrlKey || e.metaKey;
   const inField = e.target.matches && e.target.matches('input, select, textarea');
+  if (mod && !e.shiftKey && !e.altKey && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); if (pop.style.display === 'block') closePop(); goView('search'); const b = $('#srchQ'); if (b) { b.focus(); b.select(); } return; }
   if (mod && !inField && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) { e.preventDefault(); undo(); }
   else if (mod && !inField && (e.key === 'y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) { e.preventDefault(); redo(); }
 }, true);
@@ -1837,6 +2166,7 @@ lists.addEventListener('drop', e => {
 });
 function dropZone(row, t, e) {
   if (t.isSession) return 'child';
+  if (S.ui.folder && row.closest('.node').dataset.root) return 'child'; // gathered views are sorted by date: before/after would do nothing visible
   const r = row.getBoundingClientRect(), lower = e.clientY > r.top + r.height / 2;
   const tx = row.querySelector('.tx').getBoundingClientRect();
   if (lower && e.clientX > tx.left + 40) return 'child';
@@ -1887,11 +2217,7 @@ lists.addEventListener('contextmenu', e => {
 });
 
 /* ---------- sidebar & footer ---------- */
-$('#homeBtn').onclick = () => { // Home: the start screen for now; becomes the Today view in stage 4
-  if (S.ui.current) cleanupEmptySession(S.ui.current);
-  bsel.clear(); selAnchor = selFocus = null;
-  S.ui.current = null; S.ui.folder = null; save(); renderAll(); $('#main').scrollTop = 0;
-};
+$('#homeBtn').onclick = () => goView('today', { day: null }); // Home is Today
 $('#reloadBtn').textContent = '↻ Refresh (' + (isMac ? '⌘R' : 'Ctrl+R') + ')';
 $('#reloadBtn').onclick = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); stamp(); } catch (e) {} location.reload(); };
 $('#newMeeting').onclick = () => createContainer('meeting');
@@ -1934,6 +2260,7 @@ $('#importFile').onchange = e => {
     for (const s of sessionsOf(c.id)) if (!(c.id === S.ui.current && s.date === todayISO()) && treeEmpty(s.id)) deleteTree(s.id);
   }
 })();
+try { if (!sessionStorage.getItem('eccopim.tab')) { sessionStorage.setItem('eccopim.tab', '1'); S.ui.current = null; S.ui.folder = null; S.ui.view = 'today'; S.ui.day = null; } } catch (e) {}
 if (S.ui.current && S.containers[S.ui.current]) openContainer(S.ui.current);
 else { S.ui.current = null; if (S.ui.folder && !S.folders[S.ui.folder]) S.ui.folder = null; renderAll(); }
 $('#syncBtn').onclick = () => { if (syncState === 'error' && token) syncNow(); else connect(); };
@@ -1944,6 +2271,8 @@ window.addEventListener('offline', () => { if (SY.connected) { syncState = 'offl
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) navigator.serviceWorker.register('sw.js').catch(() => {});
 document.addEventListener('visibilitychange', () => { if (!document.hidden && token) syncNow(); });
 setInterval(() => { if (!document.hidden && (token || syncState === 'ok')) syncNow(); }, 60000); // pick up other laptops' edits
+let shownDay = todayISO(); // after midnight, Today and the badge move to the new day
+setInterval(() => { if (todayISO() === shownDay) return; shownDay = todayISO(); renderSidebar(); if (curView() && curView() !== 'search' && !focusInfo()) renderMain(); }, 60000);
 showSync();
 if (token) syncNow();
 })();
