@@ -38,6 +38,7 @@ body{background:var(--bg);color:var(--text);font:14px/1.55 "Segoe UI",system-ui,
 button{font:inherit;color:inherit;background:none;border:1px solid var(--line);border-radius:5px;padding:2px 8px;cursor:pointer}
 button:hover{background:var(--hover)}
 button.primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+button:disabled{opacity:.45;cursor:default}
 button:focus-visible,select:focus-visible,input:focus-visible,.item:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:2px 6px}
 
@@ -72,6 +73,7 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 #pop .menu button{display:block;width:100%;text-align:left;border:none;padding:4px 6px}
 #pop select{max-width:200px}
 #pop .danger{color:var(--err)}
+#pop .note{color:var(--muted);font-size:12px;max-width:300px}
 #side .foot{border-top:1px solid var(--line);padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px}
 #status{color:var(--muted);flex:1 0 100%}
 #status.err{color:var(--err)}
@@ -97,6 +99,7 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .head .sub select{font-size:12.5px;max-width:200px;padding:0 4px}
 .head .sub .go{border:none;color:var(--accent);padding:0 3px}
 .head .sub .del{margin-left:auto;font-size:12px;color:var(--muted)}
+.head .sub .del + .del{margin-left:0}
 
 .strip{border:1px solid var(--line);border-radius:7px;margin:0 0 12px;padding:6px 10px;background:var(--panel)}
 .strip .h{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600;margin-bottom:2px}
@@ -614,20 +617,86 @@ function openFolder(fid, focusTitle) {
   if (focusTitle) { const t = $('.head .title'); if (t) t.focus(); }
   $('#main').scrollTop = 0;
 }
+/* Items typed directly into a person or project live in its hidden inbox. When that folder goes away,
+   an item there that is also linked to another person or project moves to that one's inbox (same kind
+   first, primary first), so linking it elsewhere really does keep it. Only items linked nowhere else
+   are deleted. inboxHome tells where an item would go; rehomeInbox does it. */
+function inboxHome(b, fid) {
+  const ls = liveLinks(b).filter(l => l.folder !== fid), kind = S.folders[fid].kind;
+  ls.sort((x, y) => ((S.folders[x.folder].kind === kind ? 0 : 1) - (S.folders[y.folder].kind === kind ? 0 : 1)) || ((x.role === 'primary' ? 0 : 1) - (y.role === 'primary' ? 0 : 1)));
+  return ls.length ? ls[0].folder : null;
+}
+function inboxFate(fid) {
+  const ib = S.containers['inbox-' + fid]; let keep = 0, lose = 0;
+  if (ib) for (const b of childList(null, ib.id)) { if (inboxHome(b, fid)) keep++; else lose++; }
+  return { keep, lose };
+}
+function rehomeInbox(fid, target) { // target: send everything there (merge); otherwise each item's other link
+  const ib = S.containers['inbox-' + fid]; if (!ib) return;
+  for (const b of childList(null, ib.id)) {
+    const dest = target || inboxHome(b, fid);
+    if (!dest) { deleteTree(b.id); continue; }
+    const t = inboxFor(dest);
+    b.order = orderLast(null, t.id); b.parentId = null; setContainerDeep(b, t.id);
+  }
+  for (const b of Object.values(S.bullets)) if (b.containerId === ib.id) delete S.bullets[b.id]; // strays only
+  delete S.containers[ib.id];
+}
 function deleteFolder(fid) {
   const f = S.folders[fid]; if (!f || fid === 'me') return;
-  const ib = S.containers['inbox-' + fid];
-  const nIb = ib ? Object.values(S.bullets).filter(b => b.containerId === ib.id).length : 0;
-  if (!confirm('Delete "' + (f.name || 'Untitled') + '"?\n\nLinks to it are removed; the notes themselves stay in their meetings and documents.' +
-    (nIb ? '\n' + nIb + ' item(s) typed directly into it will be deleted.' : '') +
-    (folderKids(fid).length ? '\nIts sub-folders move up one level.' : '') + '\n(Ctrl+Z undoes this.)')) return;
+  const fate = inboxFate(fid), Z = isMac ? 'Cmd+Z' : 'Ctrl+Z';
+  if (!confirm('Delete "' + (f.name || 'Untitled') + '"?\n\nLinks to it are removed; notes stay in their meetings and documents.' +
+    (fate.keep ? '\n' + plural(fate.keep, 'item') + ' typed directly into it and also linked elsewhere will move there.' : '') +
+    (fate.lose ? '\n' + plural(fate.lose, 'item') + ' typed directly into it and linked nowhere else will be DELETED. To keep everything, Cancel and use "Merge into…" instead.' : '') +
+    (folderKids(fid).length ? '\nIts sub-folders move up one level.' : '') + '\n(' + Z + ' undoes this.)')) return;
   snap();
+  rehomeInbox(fid, null);
   for (const k of folderKids(fid)) k.parentId = f.parentId;
   for (const t of [...Object.values(S.bullets), ...Object.values(S.containers)]) if ((t.links || []).some(l => l.folder === fid)) removeLink(t, fid);
-  if (ib) { for (const b of Object.values(S.bullets)) if (b.containerId === ib.id) delete S.bullets[b.id]; delete S.containers[ib.id]; }
   delete S.folders[fid];
   if (S.ui.folder === fid) S.ui.folder = null;
   save(); renderAll();
+  toast('Deleted ' + (f.name || 'Untitled') + (fate.keep ? '; ' + plural(fate.keep, 'item') + ' kept under their other links' : ''));
+}
+/* Merge: fold one person or project into another. Every link to it becomes a link to the target
+   (a primary link stays primary), meetings whose Project it was get the target, items typed into it move
+   to the target, and its sub-folders go under the target. Then it is deleted. Nothing is copied or lost. */
+function mergeFolder(fid, into) {
+  const f = S.folders[fid], g = S.folders[into];
+  if (!f || !g || fid === 'me' || f.kind !== g.kind || folderDesc(fid).has(into)) return;
+  snap();
+  let n = 0;
+  for (const t of [...Object.values(S.bullets), ...Object.values(S.containers)]) {
+    const l = (t.links || []).find(x => x.folder === fid); if (!l) continue;
+    n++;
+    t.links = t.links.filter(x => x.folder !== fid);
+    if (!t.links.some(x => x.folder === into)) t.links.push({ folder: into, role: 'secondary' });
+    if (l.role === 'primary') setRole(t, into, 'primary');
+  }
+  rehomeInbox(fid, into);
+  for (const k of folderKids(fid)) k.parentId = into;
+  delete S.folders[fid];
+  g.collapsed = false;
+  if (S.ui.folder === fid) S.ui.folder = into;
+  save(); renderAll(); flashFolder(into);
+  toast('Merged ' + (f.name || 'Untitled') + ' into ' + (g.name || 'Untitled') + ' (' + plural(n, 'link') + ' moved)');
+}
+function mergePop(fid, x, y) {
+  const f = S.folders[fid]; if (!f || fid === 'me') return;
+  popFor = null;
+  const bad = folderDesc(fid);
+  const opts = flatFolders(f.kind).filter(([g]) => !bad.has(g.id)).map(([g, d]) => '<option value="' + g.id + '">' + '  '.repeat(d) + esc(g.name || 'Untitled') + '</option>').join('');
+  pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">Merge ' + esc(f.name || 'Untitled') + ' into…</div>' +
+    '<div class="note">Everything linked to it, its meetings, and items typed into it move to the ' + (f.kind === 'person' ? 'person' : 'project') +
+    ' you pick. Then it is deleted. Nothing is copied or lost.</div>' +
+    (opts ? '<label>Into <select id="mInto"><option value="">choose…</option>' + opts + '</select></label>'
+          : '<div class="note" style="margin-top:6px">There is no other ' + (f.kind === 'person' ? 'person' : 'project') + ' to merge into yet.</div>') +
+    '<div class="btns"><button id="mCancel">Cancel</button><button id="mGo" class="primary" disabled>Merge</button></div>';
+  placePop(x, y);
+  const sel = $('#mInto');
+  if (sel) sel.onchange = () => { $('#mGo').disabled = !sel.value; };
+  $('#mCancel').onclick = closePop;
+  $('#mGo').onclick = () => { const v = sel && sel.value; if (!v) return; closePop(); mergeFolder(fid, v); };
 }
 
 /* ---------- containers ---------- */
@@ -893,7 +962,7 @@ function renderMain() {
   { // project
     const wrap = el('span'); wrap.append('Project: ');
     const cur = containerProject(c), sel = el('select');
-    sel.innerHTML = '<option value="">none</option>' + flatFolders('project').map(([f, d]) => '<option value="' + f.id + '"' + (f.id === cur ? ' selected' : '') + '>' + '  '.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('');
+    sel.innerHTML = '<option value="">none</option>' + flatFolders('project').map(([f, d]) => '<option value="' + f.id + '"' + (f.id === cur ? ' selected' : '') + '>' + '  '.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('');
     sel.title = 'Bullets here with a person, dates, or a checkmark show up in this project automatically';
     sel.onchange = () => { snap(); if (cur) removeLink(c, cur); if (sel.value) { addLink(c, sel.value); setRole(c, sel.value, 'primary'); } save(); renderAll(); };
     wrap.appendChild(sel); sub.appendChild(wrap);
@@ -903,7 +972,7 @@ function renderMain() {
     const ppl = liveLinks(c).filter(l => S.folders[l.folder].kind === 'person');
     const tags = el('span', 'chips'); tags.innerHTML = ppl.map(l => tagHTML({ folder: l.folder, role: 'secondary' }, true)).join(''); wrap.appendChild(tags);
     const sel = el('select'); const have = new Set(ppl.map(l => l.folder));
-    sel.innerHTML = '<option value="">+ add</option>' + flatFolders('person').filter(([f]) => !have.has(f.id)).map(([f, d]) => '<option value="' + f.id + '">' + '  '.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('') + '<option value="__new">New person…</option>';
+    sel.innerHTML = '<option value="">+ add</option>' + flatFolders('person').filter(([f]) => !have.has(f.id)).map(([f, d]) => '<option value="' + f.id + '">' + '  '.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('') + '<option value="__new">New person…</option>';
     sel.onchange = () => {
       if (sel.value === '__new') { const nm = prompt('Name'); if (!nm || !nm.trim()) { sel.value = ''; return; } snap(); const f = { id: uid(), kind: 'person', name: nm.trim(), parentId: null, order: 0, collapsed: false }; S.folders[f.id] = f; c.links.push({ folder: f.id, role: 'secondary' }); }
       else if (sel.value) { snap(); c.links.push({ folder: sel.value, role: 'secondary' }); }
@@ -975,7 +1044,12 @@ function renderFolder(ct, f) {
   sub.appendChild(k);
   const addSub = el('button', 'go'); addSub.textContent = '+ sub-folder'; addSub.title = 'Nest a ' + (f.kind === 'person' ? 'person' : 'project') + ' under this one'; addSub.onclick = () => newFolder(f.kind, f.id);
   sub.appendChild(addSub);
-  if (f.id !== 'me') { const del = el('button', 'del'); del.textContent = 'Delete'; del.onclick = () => deleteFolder(f.id); sub.appendChild(del); }
+  if (f.id !== 'me') {
+    const mg = el('button', 'del'); mg.textContent = 'Merge into…'; mg.title = 'Move everything in this ' + f.kind + ' to another one, then delete this one';
+    mg.onclick = e => { const r = mg.getBoundingClientRect(); mergePop(f.id, r.left, r.bottom + 4); e.stopPropagation(); };
+    const del = el('button', 'del'); del.textContent = 'Delete'; del.onclick = () => deleteFolder(f.id);
+    sub.append(mg, del);
+  }
   head.appendChild(sub); ct.appendChild(head);
 
   const add = el('input', 'additem'); add.id = 'addItem';
@@ -1245,7 +1319,7 @@ function htmlToLines(html) {
   doc.querySelectorAll('[style]').forEach(n => { if (/mso-list\s*:\s*ignore/i.test(n.getAttribute('style'))) n.remove(); });
   const out = []; let buf = '', bufIndent = 0;
   const BLOCK = /^(P|DIV|LI|UL|OL|H[1-6]|BLOCKQUOTE|TR|TABLE|TBODY|SECTION|ARTICLE|PRE|HR|DL|DT|DD|ADDRESS)$/;
-  const flush = () => { const t = buf.replace(/[\s ]+/g, ' ').trim(); if (t) out.push({ text: t, indent: bufIndent }); buf = ''; };
+  const flush = () => { const t = buf.replace(/[\s ]+/g, ' ').trim(); if (t) out.push({ text: t, indent: bufIndent }); buf = ''; };
   const own = n => { const st = n.getAttribute && n.getAttribute('style') || ''; let v = 0;
     const ml = /margin-left\s*:\s*([^;]+)/i.exec(st), pl = /padding-left\s*:\s*([^;]+)/i.exec(st);
     if (ml) v += toPx(ml[1]); if (pl) v += toPx(pl[1]); return Math.max(0, v); };
@@ -1268,7 +1342,7 @@ function htmlToLines(html) {
 }
 function plainToLines(text) {
   return text.split(/\r?\n/).map(l => {
-    const m = /^[ \t ]*/.exec(l)[0];
+    const m = /^[ \t ]*/.exec(l)[0];
     const indent = [...m].reduce((a, ch) => a + (ch === '\t' ? 4 : 1), 0);
     return { text: l.trim(), indent };
   }).filter(x => x.text);
@@ -1514,7 +1588,7 @@ content.addEventListener('click', e => {
 });
 function folderOptions(exclude) {
   return ['person', 'project'].map(k => '<optgroup label="' + KIND_LABEL[k] + '">' +
-    flatFolders(k).filter(([f]) => !exclude.has(f.id)).map(([f, d]) => '<option value="' + f.id + '">' + '  '.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('') + '</optgroup>').join('');
+    flatFolders(k).filter(([f]) => !exclude.has(f.id)).map(([f, d]) => '<option value="' + f.id + '">' + '  '.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('') + '</optgroup>').join('');
 }
 function moveOptions(excludeId) {
   const cs = Object.values(S.containers).filter(c => (c.type === 'meeting' || c.type === 'document') && c.id !== excludeId)
@@ -1730,12 +1804,13 @@ lists.addEventListener('contextmenu', e => {
   pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">' + esc(folderPath(f.id)) + '</div><div class="menu">' +
     '<button id="fOpen">Open</button><button id="fRen">Rename</button><button id="fSub">New sub-folder</button>' +
     (f.parentId ? '<button id="fTop">Move to top level</button>' : '') +
-    (f.id !== 'me' ? '<button id="fDel">Delete…</button>' : '') + '</div>';
+    (f.id !== 'me' ? '<button id="fMerge">Merge into…</button><button id="fDel">Delete…</button>' : '') + '</div>';
   placePop(e.clientX, e.clientY);
   $('#fOpen').onclick = () => { closePop(); openFolder(f.id); };
   $('#fRen').onclick = () => { closePop(); openFolder(f.id, true); const t = $('.head .title'); if (t) t.select(); };
   $('#fSub').onclick = () => { closePop(); newFolder(f.kind, f.id); };
   if ($('#fTop')) $('#fTop').onclick = () => { snap(); f.parentId = null; save(); closePop(); renderAll(); };
+  if ($('#fMerge')) $('#fMerge').onclick = () => mergePop(f.id, e.clientX, e.clientY);
   if ($('#fDel')) $('#fDel').onclick = () => { closePop(); deleteFolder(f.id); };
 });
 
