@@ -66,7 +66,10 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .fsec .add{border:none;padding:0 6px;font-size:15px;line-height:1;color:var(--muted)}
 .fsec .add:hover{color:var(--text)}
 .item.folder{padding-right:10px}
-.item.folder .ftw{width:12px;flex:0 0 12px;color:var(--muted);font-size:10px;cursor:pointer}
+.item.folder .ftw{width:15px;flex:0 0 15px;color:var(--muted);font-size:10px;cursor:pointer;align-self:center;display:flex;align-items:center}
+/* expand/collapse for sub-folders: a boxed + / − (a bare + already means "add" in the section headers) */
+.item.folder .ftw.tog{box-sizing:border-box;width:13px;flex:0 0 13px;height:13px;margin-right:2px;justify-content:center;border:1.5px solid var(--muted);border-radius:3px;color:var(--text);font-size:12px;font-weight:800;line-height:1;background:var(--bg)}
+.item.folder .ftw.tog:hover{border-color:var(--text)}
 .item .cnt{font-size:11px;color:var(--muted);background:var(--pill);border-radius:8px;padding:0 6px}
 .item.drop,.fsec.drop{background:var(--accent-bg);outline:1px dashed var(--accent);outline-offset:-1px}
 .item.flash{animation:flash 1.2s}
@@ -117,8 +120,8 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .row.sel,.row.sel:hover{background:var(--accent-bg);box-shadow:inset 2px 0 0 var(--accent)}
 body.sweeping,body.sweeping *{-webkit-user-select:none!important;user-select:none!important}
 .tw{width:14px;flex:0 0 14px;text-align:center;color:var(--faint);font-size:11px;line-height:22px;user-select:none}
-.tw.has{cursor:pointer;color:var(--muted)}
-.tw.has:hover{color:var(--text)}
+.tw.has{cursor:pointer;color:var(--text);box-sizing:border-box;width:13px;flex:0 0 13px;height:13px;margin:4.5px 1px 0 0;display:flex;align-items:center;justify-content:center;border:1.5px solid var(--muted);border-radius:3px;font-size:12px;font-weight:800;line-height:1;background:var(--bg)}
+.tw.has:hover{border-color:var(--text)}
 .ck{margin:5px 2px 0 0;opacity:0;cursor:pointer;flex:0 0 auto}
 input[type="checkbox"]{accent-color:var(--accent)}
 .row:hover .ck,.ck.show,.ck:focus{opacity:1}
@@ -970,10 +973,11 @@ function renderSidebar() {
     if (!rows.length) { const e = el('div', 'empty-note'); e.textContent = q ? 'No matches' : 'Click + to add one'; lists.appendChild(e); }
     for (const [f, depth] of rows) {
       const it = el('div', 'item folder k-' + f.kind + (f.id === S.ui.folder ? ' cur' : '')); it.dataset.fid = f.id; it.draggable = true;
-      it.style.paddingLeft = (8 + depth * 14) + 'px';
+      it.style.paddingLeft = (8 + depth * 20) + 'px'; // a child's dot sits right of its parent's dot
       it.title = folderPath(f.id) + ' · drop bullets here to link them';
       const tw = el('span', 'ftw'); const hasKids = !q && folderKids(f.id).length > 0;
-      tw.textContent = hasKids ? (f.collapsed ? '▸' : '▾') : '';
+      tw.textContent = hasKids ? (f.collapsed ? '+' : '−') : '';
+      if (hasKids) { tw.classList.add('tog'); tw.title = f.collapsed ? 'Show sub-folders' : 'Hide sub-folders'; }
       if (hasKids) tw.onclick = ev => { ev.stopPropagation(); f.collapsed = !f.collapsed; save(); renderSidebar(); };
       const t = el('span', 't'); t.textContent = (f.name || 'Untitled') + (f.id === 'me' ? ' (To-Do)' : '');
       it.append(tw, t);
@@ -1038,7 +1042,7 @@ function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted 
   const n = el('div', 'node'); n.dataset.id = b.id; if (flat) n.dataset.flat = '1';
   const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : '') + (bsel.has(b.id) ? ' sel' : ''));
   const tw = el('span', 'tw');
-  if (kids.length) { tw.textContent = b.collapsed ? '▸' : '▾'; tw.classList.add('has'); tw.title = 'Click: collapse / expand (Ctrl+.)'; }
+  if (kids.length) { tw.textContent = b.collapsed ? '+' : '−'; tw.classList.add('has'); tw.title = (b.collapsed ? 'Click: show sub-bullets' : 'Click: hide sub-bullets') + ' (' + (isMac ? 'Cmd' : 'Ctrl') + '+.)'; }
   else tw.textContent = b.isSession ? '' : '•';
   if (!b.isSession) { tw.draggable = true; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag: onto a person or project to link, onto a meeting or document to move, or within the notes to reorder'; }
   else { tw.draggable = true; tw.textContent = tw.textContent || '•'; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag onto a person or project to link this whole session'; }
@@ -1349,10 +1353,10 @@ function renderDay(ct) {
     vHeader(ct, k + 'on', 'Scheduled', on.length, false);
     if (on.length) vItems(ct, on, false, true); else vEmpty(ct, 'No items start, end or fall due on this day.');
   }
-  const log = dayLog(d);
-  if (vHeader(ct, k + 'log', isToday ? 'Written today' : 'Written this day', log.length, true, true)) {
+  const log = isToday ? [] : dayLog(d); // Today is for what's due; the written log is for looking back (e.g. timesheets)
+  if (!isToday && vHeader(ct, k + 'log', 'Written this day', log.length, true, true)) {
     const box = el('div', 'outline');
-    if (!log.length) { const e = el('div', 'vempty'); e.textContent = isToday ? 'Nothing yet. Meetings and documents you write in today are listed here.' : 'No sessions or notes from this day.'; box.appendChild(e); }
+    if (!log.length) { const e = el('div', 'vempty'); e.textContent = 'No sessions or notes from this day.'; box.appendChild(e); }
     for (const x of log) logRow(box, x, d);
     ct.appendChild(box);
   }
@@ -1380,7 +1384,7 @@ function renderCalendar(ct) {
   nav.append(mk('‹', 'Previous month', () => goView('calendar', { month: shift(-1) })));
   if (mon !== today.slice(0, 7)) nav.append(mk('This month', 'Back to this month', () => goView('calendar', { month: null })));
   nav.append(mk('›', 'Next month', () => goView('calendar', { month: shift(1) })));
-  const key = el('span'); key.textContent = 'Meeting sessions in purple · items on their start, end or due date · completions struck through · click a day for all of it';
+  const key = el('span'); key.textContent = 'Meeting sessions in purple · open items on their start, end or due date · checked items are hidden · click a day for all of it, including what was completed';
   sub.append(nav, key); head.appendChild(sub); ct.appendChild(head);
 
   const start = new Date(y, m, 1 - first.getDay()), days = [];
@@ -1391,14 +1395,13 @@ function renderCalendar(ct) {
   for (const b of Object.values(S.bullets)) {
     const c = S.containers[b.containerId]; if (!c) continue;
     if (b.isSession) { if (!treeEmpty(b.id)) put(b.date, { k: 's', o: 0, b, text: (c.title || 'Untitled') + ((b.text || '').trim() ? ' · ' + b.text.trim() : '') }); continue; }
-    if (!(b.text || '').trim()) continue;
+    if (!(b.text || '').trim() || b.done) continue; // checked items leave the calendar (the day view still lists them)
     if (b.start || b.end) {
       const late = isLate(b);
       if (b.start && b.end && b.start !== b.end) { put(b.start, { k: 'i', o: 1, b, pre: '▸ ', tip: 'Starts', late }); put(b.end, { k: 'i', o: 1, b, pre: '◂ ', tip: 'Ends', late }); }
       else if (b.start && !b.end) put(b.start, { k: 'i', o: 1, b, pre: '▸ ', tip: 'From', late });
       else put(b.end || b.start, { k: 'i', o: 1, b, pre: '• ', tip: 'Due', late });
     }
-    if (b.done && b.doneAt) put(dayOf(b.doneAt), { k: 'd', o: 2, b, pre: '✓ ', tip: 'Completed' });
   }
   const grid = el('div', 'cal');
   for (let i = 0; i < 7; i++) { const w = el('div', 'wd'); w.textContent = parseISO(days[i]).toLocaleDateString(undefined, { weekday: 'short' }); grid.appendChild(w); }
