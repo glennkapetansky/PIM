@@ -101,7 +101,7 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .head .sub .del{margin-left:auto;font-size:12px;color:var(--muted)}
 .head .sub .del + .del{margin-left:0}
 
-.strip{border:1px solid var(--line);border-radius:7px;margin:0 0 12px;padding:6px 10px;background:var(--panel)}
+.strip{border:1px solid var(--line);border-radius:7px;margin:0 0 12px;padding:6px 10px;background:var(--panel);-webkit-user-select:none;user-select:none}
 .strip .h{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600;margin-bottom:2px}
 .strip .oi{display:flex;gap:6px;align-items:baseline;padding:1px 0}
 .strip .oi .t{cursor:pointer;flex:1}
@@ -581,6 +581,8 @@ function roleIn(b, D, kind) {
   let r = null;
   for (const l of liveLinks(b)) if (D.has(l.folder)) { if (l.role === 'primary') return { role: 'primary' }; r = 'secondary'; }
   if (r) return { role: r };
+  const s = sessionOf(b); // a session linked to the folder brings all its notes
+  if (s) { let sr = null; for (const l of liveLinks(s)) if (D.has(l.folder)) { if (l.role === 'primary') { sr = 'primary'; break; } sr = 'secondary'; } if (sr) return { role: sr, session: true }; }
   if (kind === 'project' && !liveLinks(b).some(l => S.folders[l.folder].kind === 'project')) {
     const p = containerProject(S.containers[b.containerId]);
     if (p && D.has(p) && (hasPersonLink(b) || b.start || b.end || b.done)) return { role: 'primary', inherited: true };
@@ -601,7 +603,14 @@ function folderMembers(fid) {
   }
   return roots;
 }
-const openCount = fid => folderMembers(fid).filter(x => !x.b.done && x.role === 'primary').length;
+const isNote = r => r.session && !hasTask(r.b); // a plain note that came with a linked session (not a task)
+const openCount = fid => folderMembers(fid).filter(x => !x.b.done && x.role === 'primary' && !isNote(x)).length;
+// Link every non-empty session of a meeting (dragging the meeting from the sidebar or by its grip)
+function linkMeeting(cid, fid) {
+  const ids = sessionsOf(cid).filter(s => !treeEmpty(s.id)).sort((a, b) => (a.date || '').localeCompare(b.date || '')).map(s => s.id);
+  if (!ids.length) { toast('This meeting has no notes yet', false); return; }
+  linkItems(ids, fid, plural(ids.length, 'session') + ' of ' + (S.containers[cid].title || 'Untitled'));
+}
 function newFolder(kind, parentId) {
   snap();
   const f = { id: uid(), kind, name: '', parentId: parentId || null, order: 0, collapsed: false };
@@ -697,6 +706,60 @@ function mergePop(fid, x, y) {
   if (sel) sel.onchange = () => { $('#mGo').disabled = !sel.value; };
   $('#mCancel').onclick = closePop;
   $('#mGo').onclick = () => { const v = sel && sel.value; if (!v) return; closePop(); mergeFolder(fid, v); };
+}
+
+/* Merge a meeting or document into another one: every note moves (never copied). Into a meeting, each
+   dated session joins the target's session for the same date (created if needed), keeping its topic.
+   Into a document, each session becomes a plain heading bullet ("Thu, Oct 29, 2026 — topic") over its notes.
+   Attendees are added to the target; the target keeps its own project unless it has none. Then the source
+   is deleted. */
+function mergeContainer(cid, into) {
+  const c = S.containers[cid], d = S.containers[into];
+  if (!c || !d || cid === into || c.type === 'inbox' || d.type === 'inbox') return;
+  snap();
+  let n = 0;
+  for (const t of childList(null, cid)) {
+    if (t.isSession && treeEmpty(t.id)) { deleteTree(t.id); continue; }
+    if (t.isSession && d.type === 'meeting') {
+      const s = sessionFor(into, t.date);
+      if ((t.text || '').trim() && !(s.text || '').trim()) s.text = t.text;
+      for (const k of childList(t.id, cid)) { k.order = orderLast(s.id, into); k.parentId = s.id; setContainerDeep(k, into); n += countTree(k.id); }
+      delete S.bullets[t.id];
+    } else if (t.isSession) {
+      t.text = fmtLong(t.date) + ((t.text || '').trim() ? ' — ' + t.text.trim() : '');
+      t.isSession = false; t.date = null; t.collapsed = false;
+      t.order = orderLast(null, into); t.parentId = null; setContainerDeep(t, into); n += countTree(t.id) - 1;
+    } else {
+      const parent = d.type === 'meeting' ? sessionFor(into, effDate(t) || todayISO()).id : null;
+      t.order = orderLast(parent, into); t.parentId = parent; setContainerDeep(t, into); n += countTree(t.id);
+    }
+  }
+  for (const b of Object.values(S.bullets)) if (b.containerId === cid) delete S.bullets[b.id]; // strays only
+  for (const l of liveLinks(c)) {
+    const kind = S.folders[l.folder].kind;
+    if (kind === 'person' && !d.links.some(x => x.folder === l.folder)) d.links.push({ folder: l.folder, role: 'secondary' });
+    if (kind === 'project' && !containerProject(d)) { addLink(d, l.folder); setRole(d, l.folder, 'primary'); }
+  }
+  setChain(c, 'prev', null); setChain(c, 'next', null);
+  delete S.containers[cid];
+  if (S.ui.current === cid) S.ui.current = null;
+  openContainer(into);
+  toast('Merged ' + (c.title || 'Untitled') + ' into ' + (d.title || 'Untitled') + ' (' + plural(n, 'note') + ')');
+}
+function mergeContainerPop(cid, x, y) {
+  const c = S.containers[cid]; if (!c) return;
+  popFor = null;
+  const opts = moveOptions(cid), any = Object.values(S.containers).some(o => o.id !== cid && (o.type === 'meeting' || o.type === 'document'));
+  pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">Merge ' + esc(c.title || 'Untitled') + ' into…</div>' +
+    '<div class="note">All its notes move to the meeting or document you pick, under their original dates. Then this ' + c.type + ' is deleted. Nothing is copied or lost.</div>' +
+    (any ? '<label>Into <select id="mInto"><option value="">choose…</option>' + opts + '</select></label>'
+         : '<div class="note" style="margin-top:6px">There is no other meeting or document yet.</div>') +
+    '<div class="btns"><button id="mCancel">Cancel</button><button id="mGo" class="primary" disabled>Merge</button></div>';
+  placePop(x, y);
+  const sel = $('#mInto');
+  if (sel) sel.onchange = () => { $('#mGo').disabled = !sel.value; };
+  $('#mCancel').onclick = closePop;
+  $('#mGo').onclick = () => { const v = sel && sel.value; if (!v) return; closePop(); mergeContainer(cid, v); };
 }
 
 /* ---------- containers ---------- */
@@ -810,14 +873,11 @@ function renderSidebar() {
   for (const b of Object.values(S.bullets)) if (b.isSession && (!last[b.containerId] || b.date > last[b.containerId])) last[b.containerId] = b.date;
   const byRecent = (a, b) => (last[b.id] || b.created).localeCompare(last[a.id] || a.created);
   const mtgDate = c => fmt(last[c.id] || c.created);
-  // Meetings with a project are listed under that project (not while filtering, which shows flat matches)
-  const underProject = {};
-  if (!q) for (const c of Object.values(S.containers)) if (c.type === 'meeting') { const p = containerProject(c); if (p) (underProject[p] = underProject[p] || []).push(c); }
-  for (const k in underProject) underProject[k].sort(byRecent);
   function containerRow(c, padLeft, dateFn) {
     const it = el('div', 'item k-' + c.type + (c.id === S.ui.current ? ' cur' : '')); it.dataset.cid = c.id;
     if (padLeft != null) it.style.paddingLeft = padLeft + 'px';
-    it.title = (c.title || 'Untitled') + ' · drop bullets here to move them';
+    it.title = (c.title || 'Untitled') + ' · drop bullets here to move them' + (c.type === 'meeting' ? ' · drag onto a person or project to link all its sessions' : '');
+    if (c.type === 'meeting') it.draggable = true;
     if (padLeft != null) it.appendChild(el('span', 'ftw'));
     const t = el('span', 't'); t.textContent = c.title || 'Untitled';
     const d = el('span', 'd'); d.textContent = dateFn(c);
@@ -841,8 +901,7 @@ function renderSidebar() {
       const it = el('div', 'item folder k-' + f.kind + (f.id === S.ui.folder ? ' cur' : '')); it.dataset.fid = f.id; it.draggable = true;
       it.style.paddingLeft = (8 + depth * 14) + 'px';
       it.title = folderPath(f.id) + ' · drop bullets here to link them';
-      const mtgs = underProject[f.id] || [];
-      const tw = el('span', 'ftw'); const hasKids = !q && (folderKids(f.id).length > 0 || mtgs.length > 0);
+      const tw = el('span', 'ftw'); const hasKids = !q && folderKids(f.id).length > 0;
       tw.textContent = hasKids ? (f.collapsed ? '▸' : '▾') : '';
       if (hasKids) tw.onclick = ev => { ev.stopPropagation(); f.collapsed = !f.collapsed; save(); renderSidebar(); };
       const t = el('span', 't'); t.textContent = (f.name || 'Untitled') + (f.id === 'me' ? ' (To-Do)' : '');
@@ -851,13 +910,11 @@ function renderSidebar() {
       if (n) { const d = el('span', 'cnt'); d.textContent = n; d.title = n + ' open item' + (n > 1 ? 's' : ''); it.appendChild(d); }
       it.onclick = () => openFolder(f.id);
       lists.appendChild(it);
-      if (!f.collapsed) for (const c of mtgs) containerRow(c, 8 + (depth + 1) * 14, mtgDate);
     }
   }
   const all = Object.values(S.containers).filter(c => !q || (c.title || 'untitled').toLowerCase().includes(q));
-  const nested = new Set(Object.values(underProject).flat().map(c => c.id));
   const sections = [
-    ['Meetings', all.filter(c => c.type === 'meeting' && !nested.has(c.id)).sort(byRecent), mtgDate, nested.size ? 'All are under their projects' : 'None yet'],
+    ['Meetings', all.filter(c => c.type === 'meeting').sort(byRecent), mtgDate, 'None yet'],
     ['Documents', all.filter(c => c.type === 'document').sort((a, b) => (a.title || '').localeCompare(b.title || '')), () => '', 'None yet']
   ];
   for (const [name, items, dateFn, none] of sections) {
@@ -912,6 +969,7 @@ function nodeEl(b, idx) {
   if (kids.length) { tw.textContent = b.collapsed ? '▸' : '▾'; tw.classList.add('has'); tw.title = 'Click: collapse / expand (Ctrl+.)'; }
   else tw.textContent = b.isSession ? '' : '•';
   if (!b.isSession) { tw.draggable = true; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag: onto a person or project to link, onto a meeting or document to move, or within the notes to reorder'; }
+  else { tw.draggable = true; tw.textContent = tw.textContent || '•'; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag onto a person or project to link this whole session'; }
   row.appendChild(tw);
   if (b.isSession) {
     const d = el('span', 'sdate'); d.textContent = fmtLong(b.date); d.title = 'Click to change the date or delete this session'; row.appendChild(d);
@@ -992,8 +1050,10 @@ function renderMain() {
       sub.appendChild(wrap);
     }
   }
+  const mg = el('button', 'del'); mg.textContent = 'Merge into…'; mg.title = 'Move all notes in this ' + c.type + ' into another meeting or document, then delete this one';
+  mg.onclick = e => { const r = mg.getBoundingClientRect(); mergeContainerPop(c.id, r.left, r.bottom + 4); e.stopPropagation(); };
   const del = el('button', 'del'); del.textContent = 'Delete'; del.onclick = () => deleteContainer(c);
-  sub.appendChild(del);
+  sub.append(mg, del);
   head.appendChild(sub);
   ct.appendChild(head);
 
@@ -1003,7 +1063,7 @@ function renderMain() {
     const items = openItems(c);
     if (!items.length) { const n = el('div', 'none'); n.textContent = 'None. Unchecked items linked to a person or project, or with dates, appear here.'; strip.appendChild(n); }
     for (const b of items) {
-      const r = el('div', 'oi');
+      const r = el('div', 'oi'); r.dataset.id = b.id; r.title = 'Click to go to the note · right-click for dates, links, move and delete';
       const ck = el('input'); ck.type = 'checkbox'; ck.onchange = () => { snap(); b.done = true; b.doneAt = new Date().toISOString(); save(); renderSidebar(); renderMain(); };
       const t = el('span', 't'); t.textContent = b.text; t.onclick = () => reveal(b.id);
       const m = el('span', 'meta'); m.innerHTML = '<span>from ' + fmt(effDate(b)) + '</span>' + metaHTML(b, 0);
@@ -1025,7 +1085,8 @@ function srcLabel(b) {
   const c = S.containers[b.containerId];
   if (!c) return '';
   if (c.type === 'inbox') return (c.folderId === S.ui.folder ? 'Added here' : 'Added under ' + folderName(c.folderId)) + ' · ' + fmt(effDate(b), { month: 'short', day: 'numeric', year: 'numeric' });
-  return (c.title || 'Untitled') + ' · ' + fmtLong(effDate(b));
+  const s = sessionOf(b), topic = s && (s.text || '').trim();
+  return (c.title || 'Untitled') + ' · ' + fmtLong(effDate(b)) + (topic ? ' · ' + topic : '');
 }
 function goToSource(b) {
   const c = S.containers[b.containerId]; if (!c) return;
@@ -1067,11 +1128,13 @@ function renderFolder(ct, f) {
   const roots = folderMembers(f.id);
   const byDate = (a, b) => (effDate(b.b) || '').localeCompare(effDate(a.b) || '') || (a.b.created || '').localeCompare(b.b.created || '') || a.b.order - b.b.order;
   const open = roots.filter(r => !r.b.done);
-  const pri = open.filter(r => r.role === 'primary').sort(byDate);
-  const sec = open.filter(r => r.role !== 'primary').sort(byDate);
+  const pri = open.filter(r => r.role === 'primary' && !isNote(r)).sort(byDate);
+  const sec = open.filter(r => r.role !== 'primary' && !isNote(r)).sort(byDate);
+  // notes from linked sessions: newest session first, then in the order they were written
+  const notes = open.filter(isNote).sort((a, b) => (effDate(b.b) || '').localeCompare(effDate(a.b) || '') || a.b.containerId.localeCompare(b.b.containerId) || a.b.order - b.b.order);
   const done = roots.filter(r => r.b.done).sort((a, b) => (b.b.doneAt || '').localeCompare(a.b.doneAt || ''));
   const D = folderDesc(f.id);
-  const linked = Object.values(S.containers).filter(c => c.type !== 'inbox' && liveLinks(c).some(l => D.has(l.folder)));
+  const linked = Object.values(S.containers).filter(c => c.type !== 'inbox' && (liveLinks(c).some(l => D.has(l.folder)) || sessionsOf(c.id).some(s => liveLinks(s).some(l => D.has(l.folder)))));
   const idxCache = new Map(); const idxOf = cid => { if (!idxCache.has(cid)) idxCache.set(cid, kidsIndex(cid)); return idxCache.get(cid); };
 
   function header(key, label, n, collapsible, defOpen) {
@@ -1104,6 +1167,7 @@ function renderFolder(ct, f) {
     e.textContent = 'Nothing open. Drag a bullet from your notes onto ' + (f.name || 'this ' + f.kind) + ' in the sidebar, right-click a bullet to link it, or add an item above.';
     ct.appendChild(e);
   }
+  if (notes.length && header('notes', 'Meeting notes', notes.length, true, true)) items(notes, false);
   if (sec.length && header('sec', 'Also involves ' + (f.id === 'me' ? 'me' : (f.name || 'this')), sec.length, true, true)) items(sec, true);
   if (header('mtg', 'Meetings & documents', linked.length, true, false)) {
     const box = el('div', 'outline');
@@ -1198,13 +1262,13 @@ function moveToContainer(ids, cid) {
   const it = document.querySelector('.item[data-cid="' + cid + '"]'); if (it) it.classList.add('flash');
   toast('Moved ' + plural(ids.length, 'item') + ' to ' + (c.title || 'Untitled') + (c.type === 'meeting' ? ', under their original dates' : ''));
 }
-function linkItems(ids, fid) {
+function linkItems(ids, fid, label) {
   ids = ids.filter(id => S.bullets[id]); if (!ids.length || !S.folders[fid]) return;
   snap();
   const n = ids.filter(id => addLink(S.bullets[id], fid)).length;
   if (!n) { undoStack.pop(); toast(folderName(fid) + ' is already linked', false); return; }
   save(); renderAll(); flashFolder(fid);
-  toast('Linked ' + plural(n, 'item') + ' to ' + folderName(fid));
+  toast('Linked ' + (label || plural(n, 'item')) + ' to ' + folderName(fid));
 }
 function setDoneItems(ids, val) {
   snap(); const now = new Date().toISOString();
@@ -1514,14 +1578,15 @@ content.addEventListener('keydown', e => {
     const at = prev.text.length; prev.text += t.textContent; deleteTree(b.id); commit(prev.id, at); return;
   }
   if (e.key === 'Tab') {
-    e.preventDefault(); if (b.isSession || isRoot) return;
+    e.preventDefault(); if (b.isSession) return;
+    if (isRoot) { toast('To indent, open the note where it was written (click the grey line above it). This view mixes notes from several places.', false); return; }
     const pos = getCaret(t);
     if (e.shiftKey) {
       if (!b.parentId) return;
-      const parent = S.bullets[b.parentId]; if (parent.isSession) return;
+      const parent = S.bullets[b.parentId]; if (parent.isSession) { toast('Already at the top level under this date', false); return; }
       snap(); const ord = orderAfter(parent); b.parentId = parent.parentId; b.order = ord;
     } else {
-      const s = siblings(b), p = s[s.indexOf(b) - 1]; if (!p) return;
+      const s = siblings(b), p = s[s.indexOf(b) - 1]; if (!p) { toast('Nothing above it to indent under: it is the first bullet ' + (b.parentId ? 'at this level' : 'here'), false); return; }
       snap(); b.order = orderLast(p.id, cid); b.parentId = p.id; p.collapsed = false;
     }
     commit(b.id, pos); return;
@@ -1636,14 +1701,18 @@ content.addEventListener('contextmenu', e => {
     else if (S.containers[S.ui.current]) tagPop(S.containers[S.ui.current], tg.dataset.f, e.clientX, e.clientY, false);
     return;
   }
+  const oi = e.target.closest('.strip .oi'); // an Open items entry: same menu as the note itself
+  if (oi && S.bullets[oi.dataset.id]) { e.preventDefault(); clearSel(); bulletPop(S.bullets[oi.dataset.id], e.clientX, e.clientY); return; }
   const row = e.target.closest('.row'); if (!row) return;
   if (row.classList.contains('session')) { e.preventDefault(); clearSel(); sessionPop(bulletOf(row), e.clientX, e.clientY); return; }
   e.preventDefault();
   const rid = row.closest('.node').dataset.id;
   if (bsel.size > 1 && bsel.has(rid)) { blockPop(e.clientX, e.clientY); return; }
   clearSel();
-  popFor = bulletOf(row);
-  const b = popFor;
+  bulletPop(bulletOf(row), e.clientX, e.clientY);
+});
+function bulletPop(b, x, y) {
+  popFor = b;
   const sub = countTree(b.id) - 1;
   pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">Dates</div>' +
     '<label>Start <input type="date" id="pStart" value="' + (b.start || '') + '"></label>' +
@@ -1654,7 +1723,7 @@ content.addEventListener('contextmenu', e => {
     '<label>Move to <select id="pMove"><option value="">choose…</option>' + moveOptions(b.containerId) + '</select></label>' +
     '<div class="btns"><button id="pDel" class="danger">Delete' + (sub ? ' (+' + plural(sub, 'sub-bullet') + ')' : '') + '</button>' +
     '<span style="flex:1"></span><button id="pClear">Clear dates</button><button id="pDone" class="primary">Done</button></div>';
-  placePop(e.clientX, e.clientY);
+  placePop(x, y);
   let snapped = false;
   const apply = () => {
     if (!snapped) { snap(); snapped = true; }
@@ -1668,7 +1737,7 @@ content.addEventListener('contextmenu', e => {
   $('#pDel').onclick = () => { popFor = null; closePop(); deleteItems([b.id]); };
   $('#pClear').onclick = () => { $('#pStart').value = ''; $('#pEnd').value = ''; apply(); closePop(); };
   $('#pDone').onclick = closePop;
-});
+}
 function conflictsPop() {
   popFor = null;
   if (!CONF.length) { closePop(); showSync(); return; }
@@ -1718,7 +1787,7 @@ function isDesc(t, ancestorId) { let x = t; while (x) { if (x.id === ancestorId)
 function flashFolder(fid) { const it = document.querySelector('.item.folder[data-fid="' + fid + '"]'); if (it) it.classList.add('flash'); }
 document.addEventListener('dragstart', e => {
   const t = e.target.nodeType === 1 ? e.target : e.target.parentElement;
-  const tw = t.closest('.tw[draggable="true"]'), grip = t.closest('.grip'), fi = t.closest('.item.folder');
+  const tw = t.closest('.tw[draggable="true"]'), grip = t.closest('.grip'), fi = t.closest('.item.folder'), mi = t.closest('.item[data-cid]');
   if (tw) {
     const b = bulletOf(tw);
     const ids = bsel.has(b.id) && bsel.size > 1 ? selRoots() : [b.id];
@@ -1728,6 +1797,8 @@ document.addEventListener('dragstart', e => {
     try { e.dataTransfer.setDragImage(tw.closest('.row'), 12, 11); } catch (_) {}
   } else if (grip && S.ui.current) {
     drag = { type: 'container', id: S.ui.current }; e.dataTransfer.setData('text/plain', S.containers[S.ui.current].title || ''); e.dataTransfer.effectAllowed = 'all';
+  } else if (mi && S.containers[mi.dataset.cid]) {
+    drag = { type: 'container', id: mi.dataset.cid }; e.dataTransfer.setData('text/plain', S.containers[mi.dataset.cid].title || ''); e.dataTransfer.effectAllowed = 'link';
   } else if (fi) {
     drag = { type: 'folder', id: fi.dataset.fid }; e.dataTransfer.setData('text/plain', folderName(fi.dataset.fid)); e.dataTransfer.effectAllowed = 'move';
   } else drag = null;
@@ -1744,7 +1815,7 @@ lists.addEventListener('dragover', e => {
   clearDropMarks();
   const fi = e.target.closest('.item.folder'), hdr = e.target.closest('.fsec'), ci = e.target.closest('.item[data-cid]');
   if (fi && canDropOnFolder(fi.dataset.fid)) { e.preventDefault(); e.dataTransfer.dropEffect = drag.type === 'folder' ? 'move' : 'link'; fi.classList.add('drop'); }
-  else if (ci && drag.type === 'bullet') { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; ci.classList.add('drop'); }
+  else if (ci && drag.type === 'bullet' && !drag.ids.some(id => S.bullets[id] && S.bullets[id].isSession)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; ci.classList.add('drop'); }
   else if (hdr && drag.type === 'folder' && S.folders[drag.id] && S.folders[drag.id].kind === hdr.dataset.kind) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; hdr.classList.add('drop'); }
 });
 lists.addEventListener('dragleave', e => { if (!lists.contains(e.relatedTarget)) clearDropMarks(); });
@@ -1756,10 +1827,11 @@ lists.addEventListener('drop', e => {
   if (fi && canDropOnFolder(fi.dataset.fid)) {
     const fid = fi.dataset.fid;
     if (drag.type === 'bullet') { const ids = drag.ids; drag = null; linkItems(ids, fid); refocus(f); return; }
+    if (drag.type === 'container' && S.containers[drag.id].type === 'meeting') { const cid = drag.id; drag = null; linkMeeting(cid, fid); refocus(f); return; }
     if (drag.type === 'container') { const c = S.containers[drag.id]; snap(); if (!addLink(c, fid)) setStatus(folderName(fid) + ' is already linked'); }
     else if (drag.type === 'folder') { snap(); S.folders[drag.id].parentId = fid; S.folders[fid].collapsed = false; }
     save(); renderAll(); refocus(f); flashFolder(fid);
-  } else if (ci && drag.type === 'bullet') { const ids = drag.ids; drag = null; moveToContainer(ids, ci.dataset.cid); return; }
+  } else if (ci && drag.type === 'bullet' && !drag.ids.some(id => S.bullets[id] && S.bullets[id].isSession)) { const ids = drag.ids; drag = null; moveToContainer(ids, ci.dataset.cid); return; }
   else if (hdr && drag.type === 'folder') { snap(); S.folders[drag.id].parentId = null; save(); renderAll(); refocus(f); }
   drag = null;
 });
@@ -1777,7 +1849,7 @@ content.addEventListener('dragover', e => {
   if (drag.type !== 'bullet') return;
   const row = e.target.closest('.outline .row'); if (!row) return;
   const t = bulletOf(row);
-  if (!t || drag.ids.some(id => !S.bullets[id] || isDesc(t, id))) return;
+  if (!t || drag.ids.some(id => !S.bullets[id] || S.bullets[id].isSession || isDesc(t, id))) return; // sessions only link
   const zone = dropZone(row, t, e);
   row.classList.add('drop-' + zone); dropAt = { t: t.id, zone }; e.dataTransfer.dropEffect = 'move';
 });
