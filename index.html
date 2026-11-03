@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>neoECCO</title>
+<title>Hinay</title>
 <script src="https://accounts.google.com/gsi/client" async></script>
 <style>
 /* Parchment palette. Color carries meaning, and the same color means the same thing everywhere:
@@ -115,7 +115,11 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .outline{max-width:1100px}
 .node{position:relative}
 .kids{margin-left:11px;padding-left:10px;border-left:1px solid var(--line)}
-.row{display:flex;align-items:flex-start;gap:4px;min-height:22px;border-radius:4px;padding:0 4px}
+.row{display:flex;align-items:flex-start;gap:4px;min-height:22px;border-radius:4px;padding:0 4px;position:relative}
+/* drag grip for rows with sub-bullets (their boxed +/- is mainly the expand/collapse control): shows on hover, left of the box */
+.dg{position:absolute;left:-12px;top:0;width:12px;text-align:center;line-height:22px;font-size:13px;color:var(--muted);cursor:grab;opacity:0;user-select:none}
+.row:hover>.dg,.row.sel>.dg{opacity:1}
+.dg:hover{color:var(--text)}
 .row:hover{background:var(--hover)}
 .row.sel,.row.sel:hover{background:var(--accent-bg);box-shadow:inset 2px 0 0 var(--accent)}
 body.sweeping,body.sweeping *{-webkit-user-select:none!important;user-select:none!important}
@@ -225,7 +229,7 @@ input[type="checkbox"]{accent-color:var(--accent)}
 </head>
 <body>
 <aside id="side">
-  <div class="top"><button id="homeBtn" class="brand" title="Home">neoECCO</button></div>
+  <div class="top"><button id="homeBtn" class="brand" title="Home">Hinay</button></div>
   <div class="new">
     <button id="newMeeting" title="New meeting item">+ Meeting</button>
     <button id="newDoc" title="New document">+ Document</button>
@@ -453,7 +457,7 @@ async function syncNow() {
         else { const v = S[COLL[k[0]]][k.slice(2)]; if (v) rec[k] = { mt: m.mt, dev: m.dev, v }; }
       }
       for (const k of dirty) sent[k] = M[k].mt;
-      const data = { app: 'ecco-pim', format: 3, device: DEV, savedAt: new Date().toISOString(), records: rec };
+      const data = { app: 'hinay', format: 3, device: DEV, savedAt: new Date().toISOString(), records: rec };
       let res;
       try { res = await store.write(SY.fileId, mine, data); }
       catch (e) { if (e.status === 404 && SY.fileId) { SY.fileId = null; res = await store.write(null, mine, data); } else throw e; }
@@ -1046,6 +1050,7 @@ function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted 
   else tw.textContent = b.isSession ? '' : '•';
   if (!b.isSession) { tw.draggable = true; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag: onto a person or project to link, onto a meeting or document to move, or within the notes to reorder'; }
   else { tw.draggable = true; tw.textContent = tw.textContent || '•'; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag onto a person or project to link this whole session'; }
+  if (kids.length) { const dg = el('span', 'dg'); dg.textContent = '⠿'; dg.draggable = true; dg.title = b.isSession ? 'Drag onto a person or project to link this whole session' : 'Drag: onto a person or project to link, onto a meeting or document to move, or within the notes to reorder'; row.appendChild(dg); }
   row.appendChild(tw);
   if (b.isSession) {
     const d = el('span', 'sdate'); d.textContent = fmtLong(b.date); d.title = 'Click to change the date or delete this session'; row.appendChild(d);
@@ -1504,7 +1509,7 @@ function welcome() {
   const w = el('div', 'welcome');
   const M = isMac ? 'Cmd' : 'Ctrl';
   w.innerHTML = '<h2>Pick a meeting or document, or start one.</h2>' +
-    '<p>Opening a meeting adds today\'s dated session at the top. Drag a bullet\'s dot onto a person or project in the sidebar to link it, or onto a meeting or document to move it there. Right-click a bullet for dates, links, move and delete.</p>' +
+    '<p>Opening a meeting adds today\'s dated session at the top. Drag a bullet\'s dot (or the ⠿ grip that appears beside a row with sub-bullets) onto a person or project in the sidebar to link it, or onto a meeting or document to move it there. Right-click a bullet for dates, links, move and delete.</p>' +
     '<table>' + [
       ['Enter', 'New bullet (splits at the cursor)'], ['Tab / Shift+Tab', 'Indent / outdent'],
       [M + '+Enter', 'Check / uncheck'], [M + '+.', 'Collapse / expand'],
@@ -1585,6 +1590,7 @@ function linkItems(ids, fid, label) {
   const n = ids.filter(id => addLink(S.bullets[id], fid)).length;
   if (!n) { undoStack.pop(); toast(folderName(fid) + ' is already linked', false); return; }
   save(); renderAll(); flashFolder(fid);
+  if (!label && ids.every(id => S.bullets[id].isSession)) label = n === 1 ? 'the ' + fmtLong(S.bullets[ids[0]].date) + ' session' : plural(n, 'session');
   toast('Linked ' + (label || plural(n, 'item')) + ' to ' + folderName(fid));
 }
 function setDoneItems(ids, val) {
@@ -1623,7 +1629,7 @@ content.addEventListener('mousedown', e => {
     return;
   }
   const node = row && !row.classList.contains('session') ? row.closest('.node') : null;
-  if (bsel.size && !(row && row.classList.contains('sel') && e.target.classList.contains('tw'))) clearSel(); // a selected dot starts a block drag
+  if (bsel.size && !(row && row.classList.contains('sel') && (e.target.classList.contains('tw') || e.target.classList.contains('dg')))) clearSel(); // a selected dot starts a block drag
   if (node && e.target.closest('.tx')) sweep = { start: node.dataset.id, active: false };
 });
 document.addEventListener('mousemove', e => {
@@ -2119,7 +2125,7 @@ function isDesc(t, ancestorId) { let x = t; while (x) { if (x.id === ancestorId)
 function flashFolder(fid) { const it = document.querySelector('.item.folder[data-fid="' + fid + '"]'); if (it) it.classList.add('flash'); }
 document.addEventListener('dragstart', e => {
   const t = e.target.nodeType === 1 ? e.target : e.target.parentElement;
-  const tw = t.closest('.tw[draggable="true"]'), grip = t.closest('.grip'), fi = t.closest('.item.folder'), mi = t.closest('.item[data-cid]');
+  const tw = t.closest('.tw[draggable="true"], .dg'), grip = t.closest('.grip'), fi = t.closest('.item.folder'), mi = t.closest('.item[data-cid]');
   if (tw) {
     const b = bulletOf(tw);
     const ids = bsel.has(b.id) && bsel.size > 1 ? selRoots() : [b.id];
@@ -2230,7 +2236,7 @@ $('#themeBtn').onclick = () => { const order = [null, 'light', 'dark']; S.ui.the
 $('#toastUndo').onclick = () => { hideToast(); undo(); };
 
 function exportData() {
-  const data = JSON.stringify({ app: 'ecco-pim', version: 2, exportedAt: new Date().toISOString(), containers: S.containers, bullets: S.bullets, folders: S.folders }, null, 1);
+  const data = JSON.stringify({ app: 'hinay', version: 2, exportedAt: new Date().toISOString(), containers: S.containers, bullets: S.bullets, folders: S.folders }, null, 1);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
   a.download = 'pim-backup-' + todayISO() + '.json';

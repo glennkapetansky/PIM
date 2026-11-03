@@ -1,7 +1,7 @@
-// neoECCO offline copy. Upload next to index.html.
+// Hinay offline copy. Upload next to index.html.
 // Online: always fetches the latest page (and keeps a copy). Offline or very slow network: serves the copy.
 // Notes themselves are never stored here; they live in the browser's storage and in Google Drive.
-const CACHE = 'neoecco-v1';
+const CACHE = 'hinay-v1';
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(['./', './index.html'])).then(() => self.skipWaiting()));
