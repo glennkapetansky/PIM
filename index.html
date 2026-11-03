@@ -183,6 +183,8 @@ input[type="checkbox"]{accent-color:var(--accent)}
 .item.nav .ic{width:14px;flex:0 0 14px;text-align:center;color:var(--muted)}
 .item .cnt.late{background:var(--err);color:var(--bg)}
 .pill.late{background:transparent;color:var(--err);border:1px solid currentColor;line-height:15px}
+.row.late{box-shadow:inset 2px 0 0 var(--err)}
+.row.late .tx,.row.late .meta{color:var(--err)}
 
 /* Day view and calendar */
 .dtitle{font-size:20px;font-weight:650;padding:2px 0}
@@ -1044,7 +1046,7 @@ function metaHTML(b, kidCount) {
 function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted (Today lists each dated item once)
   const allKids = idx.get(b.id) || [], kids = flat ? [] : allKids;
   const n = el('div', 'node'); n.dataset.id = b.id; if (flat) n.dataset.flat = '1';
-  const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : '') + (bsel.has(b.id) ? ' sel' : ''));
+  const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : '') + (flat && isLate(b) ? ' late' : '') + (bsel.has(b.id) ? ' sel' : '')); // flat = day view: overdue rows red
   const tw = el('span', 'tw');
   if (kids.length) { tw.textContent = b.collapsed ? '+' : '−'; tw.classList.add('has'); tw.title = (b.collapsed ? 'Click: show sub-bullets' : 'Click: hide sub-bullets') + ' (' + (isMac ? 'Cmd' : 'Ctrl') + '+.)'; }
   else tw.textContent = b.isSession ? '' : '•';
