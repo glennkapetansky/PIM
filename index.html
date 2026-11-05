@@ -1687,12 +1687,6 @@ function renderDay(ct) {
   }
   const done = (all.filter(b => b.done && b.doneAt && dayOf(b.doneAt) === d).map(b => ({ b }))).sort((a, b) => b.b.doneAt.localeCompare(a.b.doneAt));
   if (done.length && vHeader(ct, k + 'done', 'Completed', done.length, true, !isToday)) vItems(ct, done, false, true);
-  if (isToday) {
-    const n = openCount('me'), r = el('div', 'vlink'); r.style.marginTop = '14px';
-    const kk = el('span', 'k inbox'), t = el('span', 't'), dd = el('span', 'd');
-    t.textContent = 'Me (To-Do)'; dd.textContent = n ? plural(n, 'open item') + ', dated or not' : 'nothing open';
-    r.append(kk, t, dd); r.onclick = () => openFolder('me'); ct.appendChild(r);
-  }
   if (!Object.values(S.containers).some(c => c.type !== 'inbox')) ct.appendChild(welcome());
 }
 
@@ -2811,6 +2805,13 @@ content.addEventListener('click', e => { const a = e.target.closest && e.target.
 /* Today: drag by the ⠿ handle (mouse: drag; touch: hold ~0.2 s, then drag). Pointer events, so it works on the phone. */
 let rkd = null;
 function rkTarget(x, y) {
+  // anywhere below the last item of My order (Completed, empty page) = last place; no need to hit a thin strip
+  const box = content.querySelector('.rkzone[data-zone="ranked"]');
+  if (box) {
+    const its = [...box.querySelectorAll('.rkit')].filter(n => n.dataset.id !== rkd.id), last = its[its.length - 1];
+    if (last && y > last.getBoundingClientRect().bottom) return { zone: 'ranked', el: last, side: 'after' };
+    if (!last && y > box.getBoundingClientRect().top) return { zone: 'ranked', el: box, end: true };
+  }
   const hit = document.elementFromPoint(x, y); if (!hit) return null;
   const it = hit.closest('.rkit'), z = hit.closest('[data-zone]');
   if (it && it.dataset.id !== rkd.id && it.closest('[data-zone="ranked"]')) { const r = it.getBoundingClientRect(); return { zone: 'ranked', el: it, side: y < r.top + r.height / 2 ? 'before' : 'after' }; }
