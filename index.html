@@ -22,21 +22,14 @@
   --pill:#ebe1cb; --err:#b3261e; --doc:#6b6152;
   --per:#1c6847; --per-bg:#dcecdc; --prj:#8a4300; --prj-bg:#f6dfbf;
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --bg:#1e1c18; --panel:#26231e; --text:#ece6d8; --muted:#a69d8c; --faint:#5f584c;
-    --line:#38332b; --accent:#8fb0ff; --accent-bg:#27324a; --hover:#2e2a23;
-    --done:#7f7768; --warn-bg:#3b3120; --warn:#e8c56a; --session:#bcadff; --session-bg:#2b2740;
-    --pill:#322d25; --err:#ff8a80; --doc:#a69d8c;
-    --per:#86d3b0; --per-bg:#1f3a2f; --prj:#f0b46a; --prj-bg:#3d2e1a;
-  }
-}
-:root[data-theme="dark"]{
+@media (prefers-color-scheme: dark){ /* light or dark follows the system setting */
+  :root{
   --bg:#1e1c18; --panel:#26231e; --text:#ece6d8; --muted:#a69d8c; --faint:#5f584c;
   --line:#38332b; --accent:#8fb0ff; --accent-bg:#27324a; --hover:#2e2a23;
   --done:#7f7768; --warn-bg:#3b3120; --warn:#e8c56a; --session:#bcadff; --session-bg:#2b2740;
   --pill:#322d25; --err:#ff8a80; --doc:#a69d8c;
   --per:#86d3b0; --per-bg:#1f3a2f; --prj:#f0b46a; --prj-bg:#3d2e1a;
+  }
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
@@ -247,6 +240,20 @@ input[type="checkbox"]{accent-color:var(--accent)}
 .dnav{display:inline-flex;gap:4px;align-items:center}
 .dnav button{padding:0 8px}
 .vsec.late{color:var(--err)}
+.rkzone{min-height:30px;border-radius:6px}
+.rk{flex:0 0 18px;width:18px;text-align:center;line-height:22px;color:var(--muted);cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;font-size:15px}
+.rk:hover{color:var(--text)}
+.rkbtns{display:none;gap:3px;flex:0 0 auto;margin-left:4px}
+.row:hover>.rkbtns,.row:focus-within>.rkbtns{display:inline-flex}
+.rkbtns button{padding:0 7px;font-size:12px;line-height:19px;margin-top:1px}
+.rkit.dragging{opacity:.35}
+.rkit.drop-before{box-shadow:inset 0 2px 0 var(--accent)}
+.rkit.drop-after{box-shadow:inset 0 -2px 0 var(--accent)}
+.rkzone.drop-in,.vsec.drop-in{background:var(--accent-bg)}
+.rkghost{position:fixed;z-index:60;pointer-events:none;background:var(--bg);border:1px solid var(--line);box-shadow:0 6px 18px rgba(0,0,0,.2);opacity:.95}
+body.rkdragging,body.rkdragging *{cursor:grabbing!important;user-select:none!important;-webkit-user-select:none!important}
+.rkempty{color:var(--muted);font-size:12.5px;padding:7px 10px;border:1px dashed var(--line);border-radius:6px;margin:4px 0}
+@media (max-width:760px),(pointer:coarse){.rkbtns{display:inline-flex}.rk{flex-basis:26px;width:26px;font-size:18px}}
 .vlink .k{width:7px;height:7px;border-radius:50%;flex:0 0 7px;align-self:center;background:var(--doc)}
 .vlink .k.meeting{background:var(--session)} .vlink .k.inbox{background:var(--per)}
 .vlink .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -316,7 +323,6 @@ body.navHidden #content{padding-left:56px}
   <div class="foot">
     <button id="exportBtn" title="Download a complete backup file">Export</button>
     <button id="importBtn" title="Restore from a backup file">Import</button>
-    <button id="themeBtn" title="Theme">Theme: system</button>
     <button id="reloadBtn" title="Reload the page, e.g. after uploading a new version">↻ Refresh</button>
     <button id="usage" title="How much of this browser's note storage is used"></button>
     <span id="status">Saved</span>
@@ -361,11 +367,11 @@ function hash(str) { // cyrb53: short fingerprint of a record, to notice what ch
 }
 
 /* ---------- state ---------- */
-function blank() { return { version: 3, containers: {}, bullets: {}, folders: {}, ui: { current: null, folder: null, lastExport: null, theme: null } }; }
+function blank() { return { version: 3, containers: {}, bullets: {}, folders: {}, ui: { current: null, folder: null, lastExport: null } }; }
 /* Compact records (stage 8): fields at their default value and the id (it is the key) are left out when stored
    in the browser and in Drive, and put back when read. In memory and in Export every record is complete. */
 const DEFS = {
-  bullets: { parentId: null, text: '', isSession: false, date: null, start: null, end: null, done: false, doneAt: null, links: [], collapsed: false },
+  bullets: { parentId: null, text: '', isSession: false, date: null, start: null, end: null, done: false, doneAt: null, links: [], collapsed: false, rank: null },
   containers: { title: '', prev: null, next: null, links: [] },
   folders: { parentId: null, collapsed: false }
 };
@@ -407,7 +413,7 @@ ensureModel();
 let bsel = new Set(), selAnchor = null, selFocus = null;
 
 let saveTimer = null;
-function setStatus(msg, err) { const s = $('#status'); s.textContent = msg; s.classList.toggle('err', !!err); }
+function setStatus(msg, err) { const s = $('#status'); s.textContent = msg; s.hidden = !msg; s.classList.toggle('err', !!err); }
 function save() {
   setStatus('Saving…');
   clearTimeout(saveTimer);
@@ -809,7 +815,9 @@ function showSync() {
   if (!navigator.onLine && SY.connected && (syncState === 'auth' || syncState === 'error')) syncState = 'offline'; // can't reconnect without a network
   switch (syncState) {
     case 'off': msg = 'Saved in this browser only'; btn = 'Connect Google Drive'; break;
-    case 'auth': msg = 'Drive disconnected' + w; btn = 'Reconnect'; break;
+    case 'auth': { // one control: what's waiting and how to send it. N = bullets with text changed since the last sync (not meetings, sessions or deletions)
+      const q = dirtyKeys().filter(k => { const x = k[0] === 'b' && S.bullets[k.slice(2)]; return x && !x.isSession && (x.text || '').trim(); }).length;
+      msg = ''; btn = q ? 'Reconnect to save ' + plural(q, 'change') : n || lsGet(FQ_KEY, []).length ? 'Reconnect to save changes' : 'Reconnect to Drive'; break; }
     case 'offline': msg = 'Offline' + w + '. Saved in this browser'; break;
     case 'busy': msg = 'Syncing…'; break;
     case 'error': msg = 'Sync error: ' + syncErr + w; err = true; btn = 'Retry'; break;
@@ -1215,12 +1223,7 @@ function caretAtEdge(node, up) {
 function commit(focusId, pos) { save(); renderSidebar(); renderMain(); refocus({ id: focusId, pos }); }
 
 /* ---------- rendering ---------- */
-function applyTheme() {
-  const t = S.ui.theme;
-  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
-  $('#themeBtn').textContent = 'Theme: ' + (t || 'system');
-}
-function renderAll() { applyTheme(); renderSidebar(); renderBanner(); renderMain(); }
+function renderAll() { renderSidebar(); renderBanner(); renderMain(); }
 
 function renderSidebar() {
   const q = $('#filter').value.trim().toLowerCase();
@@ -1668,17 +1671,8 @@ function renderDay(ct) {
 
   const all = liveItems(), dated = all.filter(b => b.start || b.end);
   const k = 'day:';
-  if (isToday) {
-    const late = (dated.filter(isLate).map(b => ({ b }))).sort((a, b) => a.b.end.localeCompare(b.b.end));
-    const now = (dated.filter(b => !b.done && !isLate(b) && onDay(b, d)).map(b => ({ b }))).sort((a, b) => spanOf(a.b).e.localeCompare(spanOf(b.b).e));
-    const end7 = addDays(d, 7);
-    const soon = (dated.filter(b => !b.done && spanOf(b).s > d && spanOf(b).s <= end7).map(b => ({ b }))).sort((a, b) => spanOf(a.b).s.localeCompare(spanOf(b.b).s));
-    if (late.length) { vHeader(ct, k + 'late', 'Overdue', late.length, false, true, 'late'); vItems(ct, late, false, true); }
-    vHeader(ct, k + 'now', 'Active today', now.length, false);
-    if (now.length) vItems(ct, now, false, true);
-    else vEmpty(ct, 'Nothing scheduled for today. An item shows here while today falls between its start and end dates, or on its due date. Right-click a bullet to give it dates.');
-    if (soon.length && vHeader(ct, k + 'soon', 'Next 7 days', soon.length, true, true)) vItems(ct, soon, false, true);
-  } else {
+  if (isToday) renderRanked(ct, d);
+  else {
     const on = (dated.filter(b => onDay(b, d) && !(spanOf(b).e === '9999-12-31' && spanOf(b).s < d)).map(b => ({ b })))
       .sort((a, b) => (a.b.done - b.b.done) || spanOf(a.b).s.localeCompare(spanOf(b.b).s));
     vHeader(ct, k + 'on', 'Scheduled', on.length, false);
@@ -1701,6 +1695,75 @@ function renderDay(ct) {
   }
   if (!Object.values(S.containers).some(c => c.type !== 'inbox')) ct.appendChild(welcome());
 }
+
+/* ---------- Today as one ranked list (stage 9) ----------
+   Pool = open items that are overdue, active today or start within 7 days, plus undated open tasks linked to Me.
+   b.rank (synced with the bullet) orders "My order"; pool items with no rank wait in "To rank".
+   An item leaves the order when it's checked off or leaves the pool (date moved past 7 days, Me link removed);
+   its rank is cleared then, so it comes back through To rank. */
+function todayPool(d) {
+  const end7 = addDays(d, 7), pool = new Map();
+  for (const b of liveItems()) if (!b.done && (b.start || b.end) && (isLate(b) || onDay(b, d) || (spanOf(b).s > d && spanOf(b).s <= end7))) pool.set(b.id, b);
+  for (const x of folderMembers('me')) { const b = x.b; if (!b.done && !b.start && !b.end && !isNote(x) && (b.text || '').trim()) pool.set(b.id, b); }
+  return pool;
+}
+function pruneRanks(pool) { // quietly (no undo step): ranks of items that left the pool
+  let n = 0;
+  for (const b of Object.values(S.bullets)) if (b.rank != null && !pool.has(b.id)) { b.rank = null; n++; }
+  if (n) save();
+}
+const byRank = (a, b) => a.rank - b.rank;
+function toRankOrder(a, b) { // overdue first, then by the day they matter, then undated (oldest first)
+  const ka = a.start || a.end ? (isLate(a) ? '0' + a.end : '1' + spanOf(a).s) : '2' + (a.created || '');
+  const kb = b.start || b.end ? (isLate(b) ? '0' + b.end : '1' + spanOf(b).s) : '2' + (b.created || '');
+  return ka.localeCompare(kb);
+}
+function renderRanked(ct, d) {
+  const pool = todayPool(d); pruneRanks(pool);
+  const items = [...pool.values()], ranked = items.filter(b => b.rank != null).sort(byRank), fresh = items.filter(b => b.rank == null).sort(toRankOrder);
+  const idxCache = new Map(), idxOf = cid => { if (!idxCache.has(cid)) idxCache.set(cid, kidsIndex(cid)); return idxCache.get(cid); };
+  const zone = (name, list, emptyText) => {
+    const z = el('div', 'outline vgroup rkzone'); z.dataset.zone = name;
+    if (!list.length) { const e = el('div', 'rkempty'); e.textContent = emptyText; z.appendChild(e); }
+    for (const b of list) z.appendChild(rankItem(b, name, idxOf));
+    ct.appendChild(z);
+  };
+  const h1 = vHeader(ct, 'day:torank', 'To rank', fresh.length, true, true);
+  ct.lastChild.dataset.zone = 'torank';
+  if (h1) zone('torank', fresh, 'Nothing new to rank. Drag an item here to take it out of your order.');
+  vHeader(ct, 'day:mine', 'My order', ranked.length, false);
+  ct.lastChild.dataset.zone = 'ranked';
+  zone('ranked', ranked, fresh.length ? 'Drag items here from To rank by their ⠿ handle, in the order you want to do them.' : 'Nothing on your plate today. Items show up in To rank when they are overdue, active today, start within 7 days, or are open and linked to Me.');
+}
+function rankItem(b, zoneName, idxOf) {
+  const w = el('div', 'rkit'); w.dataset.id = b.id;
+  const s = el('div', 'src'); s.textContent = srcLabel(b); s.title = 'Open where this was written'; s.onclick = () => goToSource(b); w.appendChild(s);
+  const n = nodeEl(b, idxOf(b.containerId), true); n.dataset.root = '1'; w.appendChild(n);
+  const row = n.querySelector('.row');
+  const h = el('span', 'rk'); h.textContent = '⠿'; h.title = 'Drag to set its place (on a phone: hold, then drag)'; row.insertBefore(h, row.firstChild);
+  const bx = el('span', 'rkbtns');
+  const btn = (t, title, fn) => { const x = el('button'); x.textContent = t; x.title = title; x.tabIndex = -1; x.onmousedown = e => e.preventDefault(); x.onclick = e => { e.stopPropagation(); fn(); }; bx.appendChild(x); };
+  if (zoneName === 'ranked') { btn('↑', 'Move up', () => nudgeRank(b.id, -1)); btn('↓', 'Move down', () => nudgeRank(b.id, 1)); }
+  else { btn('Top', 'Put at the top of My order', () => placeRank(b.id, 0)); btn('End', 'Put at the end of My order', () => placeRank(b.id, Infinity)); }
+  row.appendChild(bx);
+  return w;
+}
+function rankedNow() { const pool = todayPool(todayISO()); return [...pool.values()].filter(b => b.rank != null).sort(byRank); }
+function placeRank(id, i) { // i = position in My order (Infinity = end); null = back to To rank
+  const b = S.bullets[id]; if (!b) return;
+  const list = rankedNow().filter(x => x.id !== id);
+  snap();
+  if (i === null) b.rank = null;
+  else {
+    i = Math.max(0, Math.min(i, list.length));
+    const prev = list[i - 1], next = list[i];
+    let r = !prev && !next ? 1 : !prev ? next.rank - 1 : !next ? prev.rank + 1 : (prev.rank + next.rank) / 2;
+    if (prev && next && !(r > prev.rank && r < next.rank && next.rank - prev.rank > 1e-6)) { list.splice(i, 0, b); list.forEach((x, k) => { x.rank = k + 1; }); }
+    else b.rank = r;
+  }
+  const m = $('#main'), top = m.scrollTop; save(); renderSidebar(); renderMain(); m.scrollTop = top;
+}
+function nudgeRank(id, dir) { const list = rankedNow(), i = list.findIndex(x => x.id === id); if (i < 0 || i + dir < 0 || i + dir >= list.length) return; placeRank(id, i + dir); }
 
 function renderCalendar(ct) {
   const today = todayISO(), mon = /^\d{4}-\d{2}$/.test(S.ui.month || '') ? S.ui.month : today.slice(0, 7);
@@ -2536,6 +2599,7 @@ function blockPop(x, y) {
   $('#bDel').onclick = () => { closePop(); deleteItems(selRoots()); };
 }
 content.addEventListener('contextmenu', e => {
+  if (e.target.closest && e.target.closest('.rk, .rkbtns')) { e.preventDefault(); return; } // holding the handle on a phone starts a drag, not the menu
   // Phone: long-press inside the bullet you're editing = the phone's own menu (Paste, Select all);
   // long-press on any other bullet = Hinay's menu.
   if (touchEditing && Date.now() - lastTouch < 2000 && e.target.closest('.tx') === document.activeElement) return;
@@ -2744,6 +2808,73 @@ content.addEventListener('focusin', e => { if (e.target.classList && e.target.cl
 $('#attachFile').onchange = () => { const f = $('#attachFile'); const t = lastTxId && S.bullets[lastTxId]; attachFiles(f.files, attachTarget(t && t.containerId === S.ui.current ? t : null)); };
 content.addEventListener('click', e => { const a = e.target.closest && e.target.closest('.att'); if (a && !a.classList.contains('missing')) openAtt(a); });
 
+/* Today: drag by the ⠿ handle (mouse: drag; touch: hold ~0.2 s, then drag). Pointer events, so it works on the phone. */
+let rkd = null;
+function rkTarget(x, y) {
+  const hit = document.elementFromPoint(x, y); if (!hit) return null;
+  const it = hit.closest('.rkit'), z = hit.closest('[data-zone]');
+  if (it && it.dataset.id !== rkd.id && it.closest('[data-zone="ranked"]')) { const r = it.getBoundingClientRect(); return { zone: 'ranked', el: it, side: y < r.top + r.height / 2 ? 'before' : 'after' }; }
+  if (z && z.dataset.zone === 'torank') return { zone: 'torank', el: z };
+  if (z && z.dataset.zone === 'ranked') { const box = content.querySelector('.rkzone[data-zone="ranked"]'); return { zone: 'ranked', el: box, end: z === box }; } // on the header = top, in the list's empty space = end
+  return null;
+}
+function rkMark(t) {
+  content.querySelectorAll('.rkit.drop-before,.rkit.drop-after,.rkzone.drop-in,.vsec.drop-in').forEach(n => n.classList.remove('drop-before', 'drop-after', 'drop-in'));
+  if (!t) return;
+  if (t.el.classList.contains('rkit')) t.el.classList.add('drop-' + t.side);
+  else { t.el.classList.add('drop-in'); const h = content.querySelector('.vsec[data-zone="' + t.zone + '"]'); if (h) h.classList.add('drop-in'); }
+}
+function rkBegin() {
+  rkd.started = true; rkd.it.classList.add('dragging'); document.body.classList.add('rkdragging');
+  const g = rkd.it.querySelector('.row').cloneNode(true); g.className = 'row rkghost'; g.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
+  g.style.width = Math.min(rkd.it.getBoundingClientRect().width, window.innerWidth - 24) + 'px'; document.body.appendChild(g); rkd.ghost = g;
+  if (navigator.vibrate && rkd.touch) try { navigator.vibrate(15); } catch (e) {}
+  rkMove(); rkd.raf = requestAnimationFrame(rkScroll);
+}
+function rkMove() {
+  rkd.ghost.style.left = Math.max(4, Math.min(rkd.x - 30, window.innerWidth - rkd.ghost.offsetWidth - 4)) + 'px'; rkd.ghost.style.top = (rkd.y - 14) + 'px';
+  rkd.target = rkTarget(rkd.x, rkd.y); rkMark(rkd.target);
+}
+function rkScroll() { // near the top or bottom edge, scroll so long lists can be reordered
+  if (!rkd || !rkd.started) return;
+  const m = $('#main'), r = m.getBoundingClientRect(), edge = 60;
+  const v = rkd.y < r.top + edge ? -Math.ceil((r.top + edge - rkd.y) / 4) : rkd.y > r.bottom - edge ? Math.ceil((rkd.y - r.bottom + edge) / 4) : 0;
+  if (v) { m.scrollTop += v; rkMove(); }
+  rkd.raf = requestAnimationFrame(rkScroll);
+}
+function rkEnd(drop) {
+  if (!rkd) return;
+  const d = rkd; rkd = null; clearTimeout(d.timer); cancelAnimationFrame(d.raf);
+  document.body.classList.remove('rkdragging'); if (d.ghost) d.ghost.remove(); d.it.classList.remove('dragging'); rkMark(null);
+  if (!drop || !d.started || !d.target) return;
+  const t = d.target;
+  if (t.zone === 'torank') { if (S.bullets[d.id].rank != null) placeRank(d.id, null); return; }
+  const list = rankedNow().filter(x => x.id !== d.id);
+  if (t.el.classList.contains('rkit')) { const i = list.findIndex(x => x.id === t.el.dataset.id); placeRank(d.id, i + (t.side === 'after' ? 1 : 0)); }
+  else placeRank(d.id, t.end ? Infinity : 0);
+}
+content.addEventListener('pointerdown', e => {
+  const h = e.target.closest && e.target.closest('.rk'); if (!h || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  e.preventDefault(); blurText();
+  const it = h.closest('.rkit');
+  rkd = { id: it.dataset.id, it, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, touch: e.pointerType !== 'mouse', started: false, timer: null };
+  if (rkd.touch) rkd.timer = setTimeout(() => { if (rkd && !rkd.started) rkBegin(); }, 200);
+});
+document.addEventListener('pointermove', e => {
+  if (!rkd) return;
+  rkd.x = e.clientX; rkd.y = e.clientY;
+  if (!rkd.started) {
+    const dist = Math.hypot(e.clientX - rkd.x0, e.clientY - rkd.y0);
+    if (!rkd.touch && dist > 4) rkBegin();
+    else if (rkd.touch && dist > 12) rkEnd(false); // moved before the hold: treat as a scroll attempt, not a drag
+    return;
+  }
+  e.preventDefault(); rkMove();
+}, { passive: false });
+document.addEventListener('pointerup', () => rkEnd(true));
+document.addEventListener('pointercancel', () => rkEnd(false));
+document.addEventListener('keydown', e => { if (rkd && e.key === 'Escape') rkEnd(false); });
+
 lists.addEventListener('contextmenu', e => {
   const fi = e.target.closest('.item.folder'); if (!fi) return;
   e.preventDefault();
@@ -2778,7 +2909,6 @@ $('#reloadBtn').onclick = () => { try { persist(); stamp(); } catch (e) {} locat
 $('#newMeeting').onclick = () => createContainer('meeting');
 $('#newDoc').onclick = () => createContainer('document');
 $('#filter').addEventListener('input', renderSidebar);
-$('#themeBtn').onclick = () => { const order = [null, 'light', 'dark']; S.ui.theme = order[(order.indexOf(S.ui.theme || null) + 1) % 3]; save(); applyTheme(); };
 $('#toastUndo').onclick = () => { hideToast(); undo(); };
 
 function exportData() {
