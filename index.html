@@ -97,6 +97,46 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 #pop .ci .cm{font-size:11.5px;color:var(--muted)}
 #pop .ci .btns{margin-top:4px}
 
+
+/* Timeline (stage 6) */
+.tl{max-width:1400px;-webkit-user-select:none;user-select:none;font-size:13px}
+.tl .tr{display:grid;grid-template-columns:var(--tlw,280px) minmax(0,1fr);align-items:stretch;min-height:24px}
+.tl .lab{padding:2px 10px 2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;line-height:20px}
+.tl .lab:hover{color:var(--accent)}
+.tl .lab .who{color:var(--muted);font-size:11.5px;margin-left:6px}
+.tl .trk{position:relative;border-left:1px solid var(--line);border-right:1px solid var(--line);overflow:hidden}
+.tl .hd{position:sticky;top:0;z-index:2;background:var(--bg)}
+.tl .hd .trk{height:34px;border-bottom:1px solid var(--line)}
+.tl .mo{position:absolute;top:1px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding-left:4px;border-left:1px solid var(--line);height:32px;white-space:nowrap}
+.tl .wk{position:absolute;bottom:1px;font-size:10.5px;color:var(--faint);padding-left:3px;white-space:nowrap}
+.tl .grid{position:absolute;top:0;bottom:0;border-left:1px solid var(--line);opacity:.55}
+.tl .now{position:absolute;top:0;bottom:0;width:0;border-left:2px solid var(--accent);z-index:1}
+.tl .grp{margin-top:10px}
+.tl .grp > .lab{font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:650;color:var(--prj)}
+.tl .grp.none > .lab{color:var(--muted)}
+.tl .grp .trk{border-bottom:1px solid var(--line)}
+.tl .ses{position:absolute;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:var(--session);cursor:pointer}
+.tl .bar{position:absolute;top:5px;height:14px;border-radius:4px;background:var(--prj);opacity:.85;cursor:pointer;min-width:4px}
+.tl .bar:hover,.tl .mk:hover,.tl .ses:hover{outline:2px solid var(--accent);outline-offset:1px}
+.tl .bar.cutl{border-top-left-radius:0;border-bottom-left-radius:0}
+.tl .bar.cutr{border-top-right-radius:0;border-bottom-right-radius:0}
+.tl .bar.from{background:linear-gradient(90deg,var(--prj) 60%,transparent)}
+.tl .mk{position:absolute;top:6px;width:11px;height:11px;margin-left:-5.5px;transform:rotate(45deg);background:var(--prj);cursor:pointer}
+.tl .late .bar,.tl .late .mk{background:var(--err)}
+.tl .late .bar.from{background:linear-gradient(90deg,var(--err) 60%,transparent)}
+.tl .late .lab{color:var(--err)}
+.tl .done .bar,.tl .done .mk{background:var(--done);opacity:.5}
+.tl .done .lab{color:var(--done);text-decoration:line-through}
+.tl .tli .trk{border-bottom:1px dotted var(--line)}
+.tl .tli:hover{background:var(--hover)}
+.tlkey{display:inline-flex;gap:12px;align-items:center;flex-wrap:wrap}
+.tlkey i{display:inline-block;vertical-align:-1px;margin-right:4px}
+.tlkey .kb{width:18px;height:9px;border-radius:3px;background:var(--prj)}
+.tlkey .km{width:8px;height:8px;transform:rotate(45deg);background:var(--prj)}
+.tlkey .ks{width:7px;height:7px;border-radius:50%;background:var(--session)}
+.tlout{color:var(--muted);font-size:12.5px;margin:10px 0}
+@media (max-width: 760px){.tl{--tlw:120px}.tl .lab .who{display:none}.tlkey{display:none}}
+
 /* Main */
 #main{flex:1;height:100%;overflow:auto;display:flex;flex-direction:column}
 #banner{background:var(--warn-bg);color:var(--warn);font-size:12.5px;padding:5px 24px;display:flex;gap:10px;align-items:center}
@@ -982,6 +1022,7 @@ function renderSidebar() {
     const v = curView(), tc = todayCount();
     const navs = [['today', '◷', 'Today', v === 'today' && !(S.ui.day && S.ui.day !== todayISO())],
       ['calendar', '▦', 'Calendar', v === 'calendar' || (v === 'today' && S.ui.day && S.ui.day !== todayISO())],
+      ['timeline', '▤', 'Timeline', v === 'timeline'],
       ['search', '⌕', 'Search', v === 'search']];
     for (const [id, ic, label, cur] of navs) {
       const it = el('div', 'item nav' + (cur ? ' cur' : '')); it.dataset.view = id;
@@ -991,7 +1032,7 @@ function renderSidebar() {
       if (id === 'today' && tc.n) { const d = el('span', 'cnt' + (tc.late ? ' late' : '')); d.textContent = tc.n; d.title = plural(tc.n, 'item') + ' active today' + (tc.late ? ', ' + tc.late + ' overdue' : ''); it.appendChild(d); }
       if (id === 'search') it.title = 'Search all notes (' + (isMac ? '⌘K' : 'Ctrl+K') + ')';
       it.onclick = id === 'search' ? () => { goView('search'); const b = $('#srchQ'); if (b) { b.focus(); b.select(); } }
-        : () => goView(id, id === 'today' ? { day: null } : { month: null });
+        : () => goView(id, id === 'today' ? { day: null } : id === 'calendar' ? { month: null } : { tlFrom: null });
       lists.appendChild(it);
     }
   }
@@ -1116,6 +1157,7 @@ function renderMain() {
     S.ui.current = null;
     const v = curView();
     if (v === 'calendar') renderCalendar(ct);
+    else if (v === 'timeline') renderTimeline(ct);
     else if (v === 'search') { renderSearch(ct, false); if (sq) { const b = $('#srchQ'); b.focus(); b.setSelectionRange(sq[0], sq[1]); } }
     else renderDay(ct);
     return;
@@ -1487,6 +1529,133 @@ function renderCalendar(ct) {
     grid.appendChild(cell);
   }
   ct.appendChild(grid);
+}
+
+/* ---------- Timeline (stage 6): dated items by project, as bars (start–end) and markers (single date) ---------- */
+const dayNum = s => { const [y, m, d] = s.split('-').map(Number); return Math.round(Date.UTC(y, m - 1, d) / 864e5); };
+const TL_SPANS = [[6, '6 weeks'], [13, '3 months'], [26, '6 months'], [52, '1 year']];
+function tlProject(b) { // the one project an item is drawn under: its primary project link, else any project link, else its meeting's project
+  const ps = liveLinks(b).filter(l => S.folders[l.folder].kind === 'project');
+  const p = ps.find(l => l.role === 'primary' && !l.note) || ps.find(l => !l.note) || ps[0];
+  if (p) return p.folder;
+  return containerProject(S.containers[b.containerId]);
+}
+function renderTimeline(ct) {
+  const today = todayISO();
+  const weeks = TL_SPANS.some(x => x[0] === S.ui.tlWeeks) ? S.ui.tlWeeks : 13;
+  const sunday = d => addDays(d, -parseISO(d).getDay());
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(S.ui.tlFrom || '') ? S.ui.tlFrom : sunday(addDays(today, -14));
+  const N = weeks * 7, to = addDays(from, N - 1), f0 = dayNum(from);
+  const pct = d => ((dayNum(d) - f0) / N * 100) + '%';
+  const showDone = !!S.ui.tlDone;
+
+  const head = el('div', 'head');
+  const tt = el('div', 'dtitle'); tt.textContent = 'Timeline'; head.appendChild(tt);
+  const sub = el('div', 'sub');
+  const nav = el('span', 'dnav');
+  const mk = (txt, title, fn) => { const b = el('button'); b.textContent = txt; b.title = title; b.onclick = fn; return b; };
+  const step = Math.max(7, Math.round(N / 3 / 7) * 7);
+  nav.append(mk('‹', 'Earlier', () => goView('timeline', { tlFrom: addDays(from, -step) })));
+  nav.append(mk('Today', 'Back to today', () => goView('timeline', { tlFrom: null })));
+  nav.append(mk('›', 'Later', () => goView('timeline', { tlFrom: addDays(from, step) })));
+  const span = el('select'); span.title = 'How much time to show';
+  for (const [w, lab] of TL_SPANS) { const o = el('option'); o.value = w; o.textContent = lab; if (w === weeks) o.selected = true; span.appendChild(o); }
+  span.onchange = () => goView('timeline', { tlWeeks: +span.value });
+  const dl = el('label'); const dc = el('input'); dc.type = 'checkbox'; dc.checked = showDone;
+  dc.onchange = () => goView('timeline', { tlDone: dc.checked }); dl.append(dc, document.createTextNode(' Show done'));
+  const key = el('span', 'tlkey');
+  key.innerHTML = '<span><i class="kb"></i>start – end</span><span><i class="km"></i>due date</span><span><i class="ks"></i>meeting</span><span>red = overdue · faded end = "from" (open until checked)</span>';
+  sub.append(nav, span, dl, key); head.appendChild(sub); ct.appendChild(head);
+
+  // gather dated items, one project each
+  const groups = new Map(); let outside = 0, total = 0;
+  for (const b of liveItems()) {
+    if (!b.start && !b.end) continue;
+    if (b.done && !showDone) continue;
+    total++;
+    const s = b.start || b.end, e = b.end || (b.start ? (b.done ? dayOf(b.doneAt || b.start) : (today > b.start ? today : b.start)) : b.end);
+    const lo = s < e ? s : e, hi = s < e ? e : s;
+    if (hi < from || lo > to) { outside++; continue; }
+    const pid = tlProject(b) || '';
+    if (!groups.has(pid)) groups.set(pid, []);
+    groups.get(pid).push({ b, lo, hi, kind: b.start && b.end && b.start !== b.end ? 'bar' : b.start && !b.end ? 'from' : 'mk' });
+  }
+  // meeting sessions per project (purple dots on the project's row)
+  const sess = new Map();
+  for (const b of Object.values(S.bullets)) {
+    if (!b.isSession || b.date < from || b.date > to) continue;
+    const c = S.containers[b.containerId]; if (!c || treeEmpty(b.id)) continue;
+    const pid = containerProject(c); if (!pid) continue;
+    if (!sess.has(pid)) sess.set(pid, []); sess.get(pid).push(b);
+  }
+
+  const tl = el('div', 'tl');
+  const lines = trk => { // month starts and week lines
+    for (let d = from; d <= to; d = addDays(d, 7)) { const g = el('div', 'grid'); g.style.left = pct(d); trk.appendChild(g); }
+    if (today >= from && today <= to) { const n = el('div', 'now'); n.style.left = 'calc(' + pct(today) + ' + ' + (50 / N) + '%)'; n.title = 'Today'; trk.appendChild(n); }
+  };
+  { // header: months and week dates
+    const r = el('div', 'tr hd'); r.appendChild(el('div', 'lab'));
+    const trk = el('div', 'trk');
+    const narrow = narrowNav(), firstMon = (() => { let d = from; while (!d.endsWith('-01') && d <= to) d = addDays(d, 1); return d; })();
+    let first = true;
+    for (let d = from; d <= to; d = addDays(d, 1)) {
+      if (!(d.endsWith('-01') || (d === from && dayNum(firstMon) - dayNum(from) >= N / (narrow ? 5 : 9)))) continue; // no label squeezed against the next month
+      const m = el('div', 'mo'); m.style.left = pct(d);
+      const yr = !narrow && weeks <= 26 && (first || d.slice(5, 7) === '01');
+      m.textContent = parseISO(d).toLocaleDateString(undefined, yr ? { month: 'short', year: 'numeric' } : { month: 'short' });
+      trk.appendChild(m); first = false;
+    }
+    if (weeks <= 13) { let k = 0; for (let d = from; d <= to; d = addDays(d, 7), k++) { if (narrow && weeks > 6 && k % 2) continue; const w = el('div', 'wk'); w.style.left = pct(d); w.textContent = parseISO(d).getDate(); trk.appendChild(w); } }
+    lines(trk); r.appendChild(trk); tl.appendChild(r);
+  }
+  const order = flatFolders('project').map(([f]) => f.id).filter(id => groups.has(id) || sess.has(id));
+  if (groups.has('')) order.push('');
+  for (const pid of order) {
+    const items = (groups.get(pid) || []).sort((a, b) => a.lo.localeCompare(b.lo) || a.hi.localeCompare(b.hi));
+    const key = 'tl:' + pid, open = viewOpen[key] !== false;
+    const g = el('div', 'grp' + (pid ? '' : ' none'));
+    const gr = el('div', 'tr');
+    const gl = el('div', 'lab'); gl.textContent = (open ? '▾ ' : '▸ ') + (pid ? folderPath(pid) : 'No project') + (items.length ? ' (' + items.length + ')' : '');
+    gl.title = open ? 'Hide these items' : 'Show these items';
+    gl.onclick = () => { viewOpen[key] = !open; renderMain(); };
+    const gt = el('div', 'trk'); lines(gt);
+    for (const s of sess.get(pid) || []) {
+      const c = S.containers[s.containerId], dot = el('div', 'ses');
+      dot.style.left = 'calc(' + pct(s.date) + ' + ' + (50 / N) + '%)';
+      dot.title = (c.title || 'Untitled') + ' · ' + fmtLong(s.date) + ((s.text || '').trim() ? ' · ' + s.text.trim() : '');
+      dot.onclick = () => { openContainer(c.id); s.collapsed = false; reveal(s.id); };
+      gt.appendChild(dot);
+    }
+    gr.append(gl, gt); g.appendChild(gr);
+    if (open) for (const it of items) {
+      const b = it.b, late = isLate(b);
+      const r = el('div', 'tr tli' + (late ? ' late' : '') + (b.done ? ' done' : ''));
+      const lab = el('div', 'lab'); lab.textContent = b.text.trim();
+      const who = liveLinks(b).filter(l => !l.note && S.folders[l.folder].kind === 'person').map(l => folderName(l.folder));
+      if (who.length) { const w = el('span', 'who'); w.textContent = who.join(', '); lab.appendChild(w); }
+      const dates = b.start && b.end ? (b.start === b.end ? fmt(b.start) : fmt(b.start) + ' – ' + fmt(b.end)) : b.start ? 'from ' + fmt(b.start) : 'by ' + fmt(b.end);
+      const tip = b.text.trim() + '\n' + dates + (late ? ' · overdue' : '') + (b.done ? ' · done' : '') + '\n' + srcLabel(b) + (who.length ? '\n' + who.join(', ') : '');
+      lab.title = tip; lab.onclick = () => goToSource(b);
+      const trk = el('div', 'trk'); lines(trk);
+      let x;
+      if (it.kind === 'mk') { x = el('div', 'mk'); x.style.left = 'calc(' + pct(it.lo) + ' + ' + (50 / N) + '%)'; }
+      else {
+        x = el('div', 'bar' + (it.kind === 'from' ? ' from' : ''));
+        const lo = it.lo < from ? from : it.lo, hi = it.hi > to ? to : it.hi;
+        if (it.lo < from) x.classList.add('cutl'); if (it.hi > to) x.classList.add('cutr');
+        x.style.left = pct(lo); x.style.width = ((dayNum(hi) - dayNum(lo) + 1) / N * 100) + '%';
+      }
+      x.title = tip; x.onclick = () => goToSource(b);
+      trk.appendChild(x);
+      r.append(lab, trk); g.appendChild(r);
+    }
+    tl.appendChild(g);
+  }
+  ct.appendChild(tl);
+  if (!total) vEmpty(ct, 'No dated items yet. Right-click a bullet (long-press on a phone) to give it a start or end date; items with both become bars, items with one date become markers.');
+  else if (!order.length) vEmpty(ct, 'Nothing dated in this range.');
+  if (outside) { const o = el('div', 'tlout'); o.textContent = plural(outside, 'dated item') + ' outside this range. Use ‹ › or a longer span to see ' + (outside === 1 ? 'it' : 'them') + '.'; ct.appendChild(o); }
 }
 
 /* Search: every word must appear in the item's text, its people/project names, or where it was written
