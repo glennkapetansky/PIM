@@ -2040,8 +2040,13 @@ content.addEventListener('keydown', e => {
 /* ---------- popovers ---------- */
 const pop = $('#pop');
 let popFor = null;
-let lastTouch = 0, popTouch = false;
-document.addEventListener('pointerdown', e => { if (e.pointerType === 'touch') lastTouch = Date.now(); }, true);
+let lastTouch = 0, popTouch = false, touchEditing = false;
+document.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'touch') return;
+  lastTouch = Date.now();
+  const tx = e.target.closest && e.target.closest('.tx');
+  touchEditing = !!tx && document.activeElement === tx; // finger went down in the bullet already being edited
+}, true);
 function placePop(x, y) {
   popTouch = Date.now() - lastTouch < 2000; // opened by a long-press on a phone
   if (popTouch) {
@@ -2128,6 +2133,9 @@ function blockPop(x, y) {
   $('#bDel').onclick = () => { closePop(); deleteItems(selRoots()); };
 }
 content.addEventListener('contextmenu', e => {
+  // Phone: long-press inside the bullet you're editing = the phone's own menu (Paste, Select all);
+  // long-press on any other bullet = Hinay's menu.
+  if (touchEditing && Date.now() - lastTouch < 2000 && e.target.closest('.tx') === document.activeElement) return;
   const tg = e.target.closest('.tag');
   if (tg) {
     e.preventDefault();
