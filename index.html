@@ -243,9 +243,6 @@ input[type="checkbox"]{accent-color:var(--accent)}
 .rkzone{min-height:30px;border-radius:6px}
 .rk{flex:0 0 18px;width:18px;text-align:center;line-height:22px;color:var(--muted);cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;font-size:15px}
 .rk:hover{color:var(--text)}
-.rkbtns{display:none;gap:3px;flex:0 0 auto;margin-left:4px}
-.row:hover>.rkbtns,.row:focus-within>.rkbtns{display:inline-flex}
-.rkbtns button{padding:0 7px;font-size:12px;line-height:19px;margin-top:1px}
 .rkit.dragging{opacity:.35}
 .rkit.drop-before{box-shadow:inset 0 2px 0 var(--accent)}
 .rkit.drop-after{box-shadow:inset 0 -2px 0 var(--accent)}
@@ -253,7 +250,13 @@ input[type="checkbox"]{accent-color:var(--accent)}
 .rkghost{position:fixed;z-index:60;pointer-events:none;background:var(--bg);border:1px solid var(--line);box-shadow:0 6px 18px rgba(0,0,0,.2);opacity:.95}
 body.rkdragging,body.rkdragging *{cursor:grabbing!important;user-select:none!important;-webkit-user-select:none!important}
 .rkempty{color:var(--muted);font-size:12.5px;padding:7px 10px;border:1px dashed var(--line);border-radius:6px;margin:4px 0}
-@media (max-width:760px),(pointer:coarse){.rkbtns{display:inline-flex}.rk{flex-basis:26px;width:26px;font-size:18px}}
+@media (max-width:760px),(pointer:coarse){.rk{flex-basis:26px;width:26px;font-size:18px}}
+@media (max-width:760px){ /* phone: tags and dates go on their own wrapping line under the text, so the text keeps the full width */
+  .row:not(.session){flex-wrap:wrap}
+  .row:not(.session)>.meta{order:9;flex:0 0 100%;flex-wrap:wrap;white-space:normal;row-gap:3px;padding-left:var(--txoff);margin-top:-1px;margin-bottom:2px}
+  .row:not(.session)>.meta:empty{display:none}
+  .row{--txoff:37px} .rkit .row{--txoff:67px} /* line the tags up under the text (measured on a Pixel 7) */
+}
 .vlink .k{width:7px;height:7px;border-radius:50%;flex:0 0 7px;align-self:center;background:var(--doc)}
 .vlink .k.meeting{background:var(--session)} .vlink .k.inbox{background:var(--per)}
 .vlink .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1719,7 +1722,7 @@ function renderRanked(ct, d) {
   const zone = (name, list, emptyText) => {
     const z = el('div', 'outline vgroup rkzone'); z.dataset.zone = name;
     if (!list.length) { const e = el('div', 'rkempty'); e.textContent = emptyText; z.appendChild(e); }
-    for (const b of list) z.appendChild(rankItem(b, name, idxOf));
+    for (const b of list) z.appendChild(rankItem(b, idxOf));
     ct.appendChild(z);
   };
   const h1 = vHeader(ct, 'day:torank', 'To rank', fresh.length, true, true);
@@ -1729,17 +1732,12 @@ function renderRanked(ct, d) {
   ct.lastChild.dataset.zone = 'ranked';
   zone('ranked', ranked, fresh.length ? 'Drag items here from To rank by their ⠿ handle, in the order you want to do them.' : 'Nothing on your plate today. Items show up in To rank when they are overdue, active today, start within 7 days, or are open and linked to Me.');
 }
-function rankItem(b, zoneName, idxOf) {
+function rankItem(b, idxOf) { // no buttons: placing and reordering is by dragging the ⠿ handle
   const w = el('div', 'rkit'); w.dataset.id = b.id;
   const s = el('div', 'src'); s.textContent = srcLabel(b); s.title = 'Open where this was written'; s.onclick = () => goToSource(b); w.appendChild(s);
   const n = nodeEl(b, idxOf(b.containerId), true); n.dataset.root = '1'; w.appendChild(n);
   const row = n.querySelector('.row');
   const h = el('span', 'rk'); h.textContent = '⠿'; h.title = 'Drag to set its place (on a phone: hold, then drag)'; row.insertBefore(h, row.firstChild);
-  const bx = el('span', 'rkbtns');
-  const btn = (t, title, fn) => { const x = el('button'); x.textContent = t; x.title = title; x.tabIndex = -1; x.onmousedown = e => e.preventDefault(); x.onclick = e => { e.stopPropagation(); fn(); }; bx.appendChild(x); };
-  if (zoneName === 'ranked') { btn('↑', 'Move up', () => nudgeRank(b.id, -1)); btn('↓', 'Move down', () => nudgeRank(b.id, 1)); }
-  else { btn('Top', 'Put at the top of My order', () => placeRank(b.id, 0)); btn('End', 'Put at the end of My order', () => placeRank(b.id, Infinity)); }
-  row.appendChild(bx);
   return w;
 }
 function rankedNow() { const pool = todayPool(todayISO()); return [...pool.values()].filter(b => b.rank != null).sort(byRank); }
@@ -1757,7 +1755,6 @@ function placeRank(id, i) { // i = position in My order (Infinity = end); null =
   }
   const m = $('#main'), top = m.scrollTop; save(); renderSidebar(); renderMain(); m.scrollTop = top;
 }
-function nudgeRank(id, dir) { const list = rankedNow(), i = list.findIndex(x => x.id === id); if (i < 0 || i + dir < 0 || i + dir >= list.length) return; placeRank(id, i + dir); }
 
 function renderCalendar(ct) {
   const today = todayISO(), mon = /^\d{4}-\d{2}$/.test(S.ui.month || '') ? S.ui.month : today.slice(0, 7);
@@ -2593,7 +2590,7 @@ function blockPop(x, y) {
   $('#bDel').onclick = () => { closePop(); deleteItems(selRoots()); };
 }
 content.addEventListener('contextmenu', e => {
-  if (e.target.closest && e.target.closest('.rk, .rkbtns')) { e.preventDefault(); return; } // holding the handle on a phone starts a drag, not the menu
+  if (e.target.closest && e.target.closest('.rk')) { e.preventDefault(); return; } // holding the handle on a phone starts a drag, not the menu
   // Phone: long-press inside the bullet you're editing = the phone's own menu (Paste, Select all);
   // long-press on any other bullet = Hinay's menu.
   if (touchEditing && Date.now() - lastTouch < 2000 && e.target.closest('.tx') === document.activeElement) return;
