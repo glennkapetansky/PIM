@@ -232,6 +232,14 @@ input[type="checkbox"]{accent-color:var(--accent)}
 .item .cnt.late{background:var(--err);color:var(--bg)}
 .pill.late{background:transparent;color:var(--err);border:1px solid currentColor;line-height:15px}
 .row.late{box-shadow:inset 2px 0 0 var(--err)}
+.att{margin:2px 0 6px 44px;display:inline-flex;flex-direction:column;gap:3px;max-width:calc(100% - 52px);cursor:pointer;color:var(--muted);font-size:12px}
+.att.img img{display:block;max-width:min(560px,100%);max-height:320px;border-radius:6px;border:1px solid var(--line, rgba(0,0,0,.12));background:var(--hover)}
+.att:not(.img) .fname{color:var(--link, var(--accent));font-size:13px}
+.att:hover .fname{text-decoration:underline}
+.att.missing{cursor:default}.att.missing:hover .fname{text-decoration:none}
+.att.missing.img img{display:none}
+.head .sub button.attach{cursor:pointer}
+@media (max-width:760px){.att{margin-left:30px;max-width:calc(100% - 34px)}.att.img img{max-height:240px}}
 .row.late .tx,.row.late .meta{color:var(--err)}
 
 /* Day view and calendar */
@@ -301,7 +309,7 @@ body.navHidden #content{padding-left:56px}
   <div class="top"><button id="homeBtn" class="brand" title="Home">Hinay</button></div>
   <div class="new">
     <button id="newMeeting" title="New meeting item">+ Meeting</button>
-    <button id="newDoc" title="New document">+ Document</button>
+    <button id="newDoc" title="New file: a notes page with no dates, for pictures, PDFs and reference notes">+ File</button>
   </div>
   <input id="filter" placeholder="Filter titles…" autocomplete="off">
   <div id="lists"></div>
@@ -314,6 +322,7 @@ body.navHidden #content{padding-left:56px}
     <button id="syncBtn" hidden></button>
     <button id="confBtn" hidden title="Edits that a newer edit replaced; restore or dismiss them"></button>
     <input type="file" id="importFile" accept=".json,application/json" hidden>
+    <input type="file" id="attachFile" multiple hidden>
   </div>
 </aside>
 <main id="main">
@@ -496,6 +505,147 @@ const DriveStore = {
 };
 const store = DriveStore;
 
+/* ---------- attachments (stage 7): pictures and other files dropped into a meeting or file ----------
+   A bullet with b.file = {key, name, type, size} shows the file under its text (the text is a searchable caption).
+   The bytes are not in the notes or the export: each file is one Drive file "hinay-file-<key>" in appDataFolder,
+   plus a copy in this browser's IndexedDB (so it shows offline and before it reaches Drive).
+   Files added while Drive is not connected wait in eccopim.fileq and upload on the next sync. */
+const FILE_MAX = 25 * 1024 * 1024, IMG_EDGE = 1600, FQ_KEY = 'eccopim.fileq';
+let fileDBp = null;
+function fileDB() {
+  return fileDBp || (fileDBp = new Promise((res, rej) => {
+    const r = indexedDB.open('hinay-files', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('f');
+    r.onsuccess = () => res(r.result); r.onerror = () => { fileDBp = null; rej(r.error); };
+  }));
+}
+async function fdb(mode, fn) {
+  const db = await fileDB();
+  return new Promise((res, rej) => { const tx = db.transaction('f', mode); const r = fn(tx.objectStore('f')); tx.oncomplete = () => res(r && r.result); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); });
+}
+const fileGet = k => fdb('readonly', st => st.get(k)).catch(() => null);
+const filePut = (k, blob) => fdb('readwrite', st => st.put(blob, k));
+const fsize = n => n < 1024 ? n + ' B' : n < 1048576 ? Math.round(n / 1024) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+const isImgType = t => /^image\/(jpeg|png|gif|webp|bmp|svg\+xml|avif)$/.test(t || '');
+const urlCache = new Map(), urlLoading = new Map();
+
+async function shrinkImage(f) { // long edge to 1600 px, JPEG: a phone photo of a whiteboard goes from ~3 MB to ~250 KB
+  if (!/^image\/(jpeg|png|webp|bmp)$/.test(f.type)) return null;
+  let bmp;
+  try { bmp = await createImageBitmap(f, { imageOrientation: 'from-image' }); } catch (e) { return null; }
+  const k = Math.min(1, IMG_EDGE / Math.max(bmp.width, bmp.height));
+  if (k === 1 && f.size <= 600 * 1024) { bmp.close && bmp.close(); return null; } // already small: keep it as it is (crisp screenshots)
+  const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+  const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(bmp, 0, 0, cv.width, cv.height);
+  bmp.close && bmp.close();
+  const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.85));
+  return blob && blob.size < f.size ? blob : null;
+}
+
+function attachTarget(t) { // where files go when dropped on (or added after) bullet t; null t = the open meeting's today session / end of the file
+  const c = S.containers[S.ui.current]; if (!c) return null;
+  if (t && t.containerId === c.id && S.bullets[t.id]) {
+    if (t.isSession) { t.collapsed = false; return { cid: c.id, parent: t.id, after: childList(t.id, c.id).filter(x => (x.text || '').trim() || x.file).pop() || null, before: null }; }
+    const blank = !(t.text || '').trim() && !t.file && !childList(t.id, c.id).length;
+    return blank ? { cid: c.id, parent: t.parentId, after: null, before: t } : { cid: c.id, parent: t.parentId, after: t, before: null };
+  }
+  if (c.type === 'meeting') { const s = sessionFor(c.id, todayISO()); s.collapsed = false; return attachTarget(s); }
+  return { cid: c.id, parent: null, after: childList(null, c.id).filter(x => (x.text || '').trim() || x.file).pop() || null, before: null };
+}
+
+async function attachFiles(list, at) {
+  const files = [...(list || [])]; if (!files.length || !at) return;
+  const made = [], skipped = [];
+  setStatus('Adding ' + plural(files.length, 'file') + '…');
+  for (const f of files) {
+    let blob = f, name = f.name || 'Pasted picture.png', type = f.type || 'application/octet-stream';
+    const small = await shrinkImage(f).catch(() => null);
+    if (small) { blob = small; type = 'image/jpeg'; name = name.replace(/\.[^.]+$/, '') + '.jpg'; }
+    if (blob.size > FILE_MAX) { skipped.push(name + ' (' + fsize(blob.size) + ', limit 25 MB)'); continue; }
+    const key = uid() + uid();
+    try { await filePut(key, blob); } catch (e) { skipped.push(name + ' (this browser would not store it)'); continue; }
+    urlCache.set(key, URL.createObjectURL(blob));
+    made.push({ key, name, type, size: blob.size });
+  }
+  showSync();
+  if (skipped.length) alert('Not added:\n' + skipped.join('\n'));
+  if (!made.length) return;
+  snap();
+  let prev = at.after, last = null;
+  for (const m of made) {
+    const order = at.before ? (() => { const s = childList(at.parent, at.cid), i = s.indexOf(at.before), p = s[i - 1]; return p ? (p.order + at.before.order) / 2 : at.before.order - 1; })()
+      : prev ? orderAfter(prev) : orderFirst(at.parent, at.cid);
+    last = prev = newBullet(at.cid, at.parent, order, { text: m.name.replace(/\.[^.]+$/, ''), file: m });
+  }
+  const q = lsGet(FQ_KEY, []); lsSet(FQ_KEY, q.concat(made.map(m => m.key)));
+  commit(last.id, 'end');
+  toast('Added ' + (made.length > 1 ? plural(made.length, 'file') : made[0].name) + (token ? '' : (made.length > 1 ? '. They go' : '. It goes') + ' to Drive when you connect'), true);
+  scheduleSync(500);
+}
+
+async function driveFileId(key) {
+  const q = encodeURIComponent("name = 'hinay-file-" + key + "' and trashed = false");
+  const r = await gfetch(API + '?spaces=appDataFolder&pageSize=1&fields=files(id)&q=' + q);
+  const f = ((await r.json()).files || [])[0]; return f ? f.id : null;
+}
+async function driveUpload(name, blob) {
+  const type = blob.type || 'application/octet-stream', meta = JSON.stringify({ name, parents: ['appDataFolder'] });
+  if (blob.size <= 4 * 1024 * 1024) {
+    const b = 'hinay' + uid();
+    const body = new Blob(['--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + meta + '\r\n--' + b + '\r\nContent-Type: ' + type + '\r\n\r\n', blob, '\r\n--' + b + '--']);
+    return (await gfetch(UP + '?uploadType=multipart&fields=id', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b }, body })).json();
+  }
+  const r = await gfetch(UP + '?uploadType=resumable&fields=id', { method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': type }, body: meta });
+  const loc = r.headers.get('Location'); if (!loc) throw new Error('Drive did not accept a large upload');
+  return (await gfetch(loc, { method: 'PUT', headers: { 'Content-Type': type }, body: blob })).json();
+}
+async function uploadFiles() { // runs after each sync: send this browser's new files to Drive
+  let q = lsGet(FQ_KEY, []);
+  for (const key of q.slice()) {
+    const blob = await fileGet(key);
+    if (blob && !(await driveFileId(key))) { setStatus('Sending a file to Drive…'); await driveUpload('hinay-file-' + key, blob); }
+    q = lsGet(FQ_KEY, []).filter(k => k !== key); lsSet(FQ_KEY, q);
+  }
+}
+function fileURL(key) { // this browser's copy, else Drive (then kept here)
+  if (urlCache.has(key)) return Promise.resolve(urlCache.get(key));
+  if (urlLoading.has(key)) return urlLoading.get(key);
+  const p = (async () => {
+    let blob = await fileGet(key);
+    if (!blob && token && navigator.onLine) {
+      const id = await driveFileId(key);
+      if (id) { blob = await (await gfetch(API + '/' + encodeURIComponent(id) + '?alt=media')).blob(); filePut(key, blob).catch(() => {}); }
+    }
+    if (!blob) return null;
+    const u = URL.createObjectURL(blob); urlCache.set(key, u); return u;
+  })().catch(() => null).finally(() => urlLoading.delete(key));
+  urlLoading.set(key, p); return p;
+}
+function attEl(b) {
+  const f = b.file, a = el('div', 'att' + (isImgType(f.type) ? ' img' : '')); a.dataset.key = f.key;
+  if (isImgType(f.type)) { const im = el('img'); im.alt = b.text || f.name; im.draggable = false; a.appendChild(im); }
+  const nm = el('span', 'fname'); a.appendChild(nm);
+  a.title = 'Click to open · right-click (long-press on a phone) to move, link or delete';
+  loadAtt(a, b);
+  return a;
+}
+function loadAtt(a, b) {
+  const f = b.file, nm = a.querySelector('.fname'), im = a.querySelector('img');
+  nm.textContent = (im ? '' : '📄 ') + f.name + ' · ' + fsize(f.size);
+  fileURL(f.key).then(u => {
+    a.classList.toggle('missing', !u);
+    if (!u) { nm.textContent += token ? ' · not in Drive yet (it uploads from the device that added it)' : ' · not on this device yet: connect to Drive to load it'; return; }
+    a.dataset.url = u; if (im) im.src = u;
+  });
+}
+function retryMissing() { for (const a of document.querySelectorAll('.att.missing')) { const b = bulletOf(a); if (b && b.file) loadAtt(a, b); } }
+function openAtt(a) {
+  const b = bulletOf(a), u = a.dataset.url; if (!u || !b) return;
+  const l = document.createElement('a'); l.href = u; l.target = '_blank'; l.rel = 'noopener';
+  if (!isImgType(b.file.type) && !/pdf|^text\//.test(b.file.type)) l.download = b.file.name; // open pictures, PDFs and text; download the rest
+  document.body.appendChild(l); l.click(); l.remove();
+}
+
 function scheduleSync(ms) { if (!token) return; clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, ms); }
 async function syncNow() {
   clearTimeout(syncTimer);
@@ -533,6 +683,7 @@ async function syncNow() {
       SY.fileId = res.id;
       for (const k in sent) if ((SY.base[k] || 0) < sent[k]) SY.base[k] = sent[k];
     }
+    try { await uploadFiles(); } catch (e) { if (e.auth || e instanceof TypeError) throw e; console.warn('File upload', e); }
     SY.last = Date.now(); saveSY(); syncState = 'ok'; syncErr = '';
   } catch (e) {
     if (e.auth) syncState = 'auth';
@@ -540,6 +691,7 @@ async function syncNow() {
     else { syncState = 'error'; syncErr = e.message || String(e); }
   }
   syncing = false; showSync();
+  if (syncState === 'ok') retryMissing();
   if (syncAgain || (syncState === 'ok' && dirtyKeys().length)) { syncAgain = false; scheduleSync(1000); }
 }
 function mergeRemote(recs) {
@@ -623,7 +775,7 @@ function newBullet(cid, pid, order, extra) {
 }
 function deleteTree(id) { for (const k of Object.values(S.bullets).filter(x => x.parentId === id)) deleteTree(k.id); delete S.bullets[id]; }
 function countTree(id) { return 1 + Object.values(S.bullets).filter(x => x.parentId === id).reduce((a, k) => a + countTree(k.id), 0); }
-function treeEmpty(id) { const b = S.bullets[id]; if ((b.text || '').trim()) return false; return Object.values(S.bullets).filter(x => x.parentId === id).every(k => treeEmpty(k.id)); }
+function treeEmpty(id) { const b = S.bullets[id]; if ((b.text || '').trim() || b.file) return false; return Object.values(S.bullets).filter(x => x.parentId === id).every(k => treeEmpty(k.id)); }
 function sessionsOf(cid) { return Object.values(S.bullets).filter(b => b.containerId === cid && b.isSession); }
 // a bullet is task-like when it is checked, has dates, or has a link that isn't a note link
 function hasTask(b) { return !!(b.done || b.start || b.end || (b.links || []).some(l => !l.note)); }
@@ -660,6 +812,7 @@ function placeAt(ids, parentId, cid, k) {
 
 /* ---------- people & projects (folders) and links ---------- */
 const KIND_LABEL = { person: 'People', project: 'Projects' };
+const kindName = c => c.type === 'document' ? 'file' : c.type; // "+ File" pages are type 'document' inside (kept for old data)
 function folderKids(pid, kind) {
   return Object.values(S.folders).filter(f => (f.parentId || null) === (pid || null) && (!kind || f.kind === kind))
     .sort((a, b) => (a.order - b.order) || (a.name || '').localeCompare(b.name || ''));
@@ -678,7 +831,7 @@ function addLink(t, fid) {
   if (t.links.some(l => l.folder === fid)) return false;
   const kind = S.folders[fid].kind;
   const hasPri = liveLinks(t).some(l => S.folders[l.folder].kind === kind && l.role === 'primary');
-  t.links.push({ folder: fid, role: hasPri ? 'secondary' : 'primary' });
+  t.links.push(Object.assign({ folder: fid, role: hasPri ? 'secondary' : 'primary' }, t.file ? { note: true } : {})); // a linked picture or file is reference, not a task
   return true;
 }
 function setRole(t, fid, role) {
@@ -786,7 +939,7 @@ function rehomeInbox(fid, target) { // target: send everything there (merge); ot
 function deleteFolder(fid) {
   const f = S.folders[fid]; if (!f || fid === 'me') return;
   const fate = inboxFate(fid), Z = isMac ? 'Cmd+Z' : 'Ctrl+Z';
-  if (!confirm('Delete "' + (f.name || 'Untitled') + '"?\n\nLinks to it are removed; notes stay in their meetings and documents.' +
+  if (!confirm('Delete "' + (f.name || 'Untitled') + '"?\n\nLinks to it are removed; notes stay in their meetings and files.' +
     (fate.keep ? '\n' + plural(fate.keep, 'item') + ' typed directly into it and also linked elsewhere will move there.' : '') +
     (fate.lose ? '\n' + plural(fate.lose, 'item') + ' typed directly into it and linked nowhere else will be DELETED. To keep everything, Cancel and use "Merge into…" instead.' : '') +
     (folderKids(fid).length ? '\nIts sub-folders move up one level.' : '') + '\n(' + Z + ' undoes this.)')) return;
@@ -883,9 +1036,9 @@ function mergeContainerPop(cid, x, y) {
   popFor = null;
   const opts = moveOptions(cid), any = Object.values(S.containers).some(o => o.id !== cid && (o.type === 'meeting' || o.type === 'document'));
   pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">Merge ' + esc(c.title || 'Untitled') + ' into…</div>' +
-    '<div class="note">All its notes move to the meeting or document you pick, under their original dates. Then this ' + c.type + ' is deleted. Nothing is copied or lost.</div>' +
+    '<div class="note">All its notes move to the meeting or file you pick, under their original dates. Then this ' + kindName(c) + ' is deleted. Nothing is copied or lost.</div>' +
     (any ? '<label>Into <select id="mInto"><option value="">choose…</option>' + opts + '</select></label>'
-         : '<div class="note" style="margin-top:6px">There is no other meeting or document yet.</div>') +
+         : '<div class="note" style="margin-top:6px">There is no other meeting or file yet.</div>') +
     '<div class="btns"><button id="mCancel">Cancel</button><button id="mGo" class="primary" disabled>Merge</button></div>';
   placePop(x, y);
   const sel = $('#mInto');
@@ -1067,7 +1220,7 @@ function renderSidebar() {
   const all = Object.values(S.containers).filter(c => !q || (c.title || 'untitled').toLowerCase().includes(q));
   const sections = [
     ['Meetings', all.filter(c => c.type === 'meeting').sort(byRecent), mtgDate, 'None yet'],
-    ['Documents', all.filter(c => c.type === 'document').sort((a, b) => (a.title || '').localeCompare(b.title || '')), () => '', 'None yet']
+    ['Files', all.filter(c => c.type === 'document').sort((a, b) => (a.title || '').localeCompare(b.title || '')), () => '', 'None yet']
   ];
   for (const [name, items, dateFn, none] of sections) {
     const h = el('div', 'sec'); h.textContent = name; lists.appendChild(h);
@@ -1121,9 +1274,9 @@ function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted 
   const tw = el('span', 'tw');
   if (kids.length) { tw.textContent = b.collapsed ? '+' : '−'; tw.classList.add('has'); tw.title = (b.collapsed ? 'Click: show sub-bullets' : 'Click: hide sub-bullets') + ' (' + (isMac ? 'Cmd' : 'Ctrl') + '+.)'; }
   else tw.textContent = b.isSession ? '' : '•';
-  if (!b.isSession) { tw.draggable = true; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag: onto a person or project to link, onto a meeting or document to move, or within the notes to reorder'; }
+  if (!b.isSession) { tw.draggable = true; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag: onto a person or project to link, onto a meeting or file to move, or within the notes to reorder'; }
   else { tw.draggable = true; tw.textContent = tw.textContent || '•'; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag onto a person or project to link this whole session'; }
-  if (kids.length) { const dg = el('span', 'dg'); dg.textContent = '⠿'; dg.draggable = true; dg.title = b.isSession ? 'Drag onto a person or project to link this whole session' : 'Drag: onto a person or project to link, onto a meeting or document to move, or within the notes to reorder'; row.appendChild(dg); }
+  if (kids.length) { const dg = el('span', 'dg'); dg.textContent = '⠿'; dg.draggable = true; dg.title = b.isSession ? 'Drag onto a person or project to link this whole session' : 'Drag: onto a person or project to link, onto a meeting or file to move, or within the notes to reorder'; row.appendChild(dg); }
   row.appendChild(tw);
   if (b.isSession) {
     const d = el('span', 'sdate'); d.textContent = fmtLong(b.date); d.title = 'Click to change the date or delete this session'; row.appendChild(d);
@@ -1137,6 +1290,7 @@ function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted 
   row.appendChild(tx);
   const meta = el('span', 'meta'); meta.innerHTML = metaHTML(b, kids.length) + (flat && allKids.length ? '<span title="Sub-bullets; open the note to see them">(+' + allKids.length + ')</span>' : ''); row.appendChild(meta);
   n.appendChild(row);
+  if (b.file) { row.classList.add('hasfile'); tx.dataset.ph = 'Caption'; n.appendChild(attEl(b)); }
   if (kids.length && !b.collapsed) { const k = el('div', 'kids'); for (const c of kids) k.appendChild(nodeEl(c, idx)); n.appendChild(k); }
   return n;
 }
@@ -1164,7 +1318,7 @@ function renderMain() {
   }
 
   const head = el('div', 'head');
-  const title = el('input', 'title'); title.value = c.title || ''; title.placeholder = c.type === 'meeting' ? 'Meeting title' : 'Document title';
+  const title = el('input', 'title'); title.value = c.title || ''; title.placeholder = c.type === 'meeting' ? 'Meeting title' : 'File title';
   title.addEventListener('focus', () => snap());
   title.addEventListener('input', () => { c.title = title.value; save(); renderSidebar(); });
   title.addEventListener('keydown', e => {
@@ -1175,11 +1329,11 @@ function renderMain() {
   });
   const trow = el('div', 'trow');
   const grip = el('span', 'grip'); grip.textContent = '⠿'; grip.draggable = true;
-  grip.title = 'Drag onto a person or project to link this whole ' + (c.type === 'meeting' ? 'meeting' : 'document');
+  grip.title = 'Drag onto a person or project to link this whole ' + (c.type === 'meeting' ? 'meeting' : 'file');
   trow.append(grip, title); head.appendChild(trow);
 
   const sub = el('div', 'sub');
-  const kind = el('span'); kind.textContent = (c.type === 'meeting' ? 'Meeting' : 'Document') + ' · created ' + fmt(c.created, { month: 'short', day: 'numeric', year: 'numeric' });
+  const kind = el('span'); kind.textContent = (c.type === 'meeting' ? 'Meeting' : 'File') + ' · created ' + fmt(c.created, { month: 'short', day: 'numeric', year: 'numeric' });
   sub.appendChild(kind);
   { // project
     const wrap = el('span'); wrap.append('Project: ');
@@ -1214,7 +1368,12 @@ function renderMain() {
       sub.appendChild(wrap);
     }
   }
-  const mg = el('button', 'del'); mg.textContent = 'Merge into…'; mg.title = 'Move all notes in this ' + c.type + ' into another meeting or document, then delete this one';
+  const atb = el('button', 'attach'); atb.textContent = '📎 Attach';
+  atb.title = 'Add pictures, PDFs or other files' + (c.type === 'meeting' ? ' to today\'s session' : '') + ' (after the bullet you were last in). You can also drop or paste them into the notes.';
+  atb.onmousedown = e => e.preventDefault(); // keep the bullet you were in as the place to add
+  atb.onclick = () => { const f = $('#attachFile'); f.value = ''; f.click(); };
+  sub.appendChild(atb);
+  const mg = el('button', 'del'); mg.textContent = 'Merge into…'; mg.title = 'Move all notes in this ' + kindName(c) + ' into another meeting or file, then delete this one';
   mg.onclick = e => { const r = mg.getBoundingClientRect(); mergeContainerPop(c.id, r.left, r.bottom + 4); e.stopPropagation(); };
   const del = el('button', 'del'); del.textContent = 'Delete'; del.onclick = () => deleteContainer(c);
   sub.append(mg, del);
@@ -1323,13 +1482,13 @@ function renderFolder(ct, f) {
   }
   if (notes.length && header('notes', 'Meeting notes', notes.length, true, true)) items(notes, false);
   if (sec.length && header('sec', 'Also involves ' + (f.id === 'me' ? 'me' : (f.name || 'this')), sec.length, true, true)) items(sec, true);
-  if (header('mtg', 'Meetings & documents', linked.length, true, false)) {
+  if (header('mtg', 'Meetings & files', linked.length, true, false)) {
     const box = el('div', 'outline');
     if (!linked.length) { const e = el('div', 'vempty'); e.textContent = f.kind === 'person' ? 'Add ' + (f.name || 'this person') + ' as an attendee on a meeting to list it here.' : 'Set a meeting\'s Project to list it here.'; box.appendChild(e); }
     for (const c of linked.sort((a, b) => (b.created || '').localeCompare(a.created || ''))) {
       const ds = sessionsOf(c.id).map(x => x.date).sort();
       const r = el('div', 'vlink'); const t = el('span'); t.textContent = c.title || 'Untitled';
-      const d = el('span', 'd'); d.textContent = (c.type === 'meeting' ? 'Meeting' : 'Document') + (ds.length ? ' · last ' + fmt(ds[ds.length - 1]) : '');
+      const d = el('span', 'd'); d.textContent = (c.type === 'meeting' ? 'Meeting' : 'File') + (ds.length ? ' · last ' + fmt(ds[ds.length - 1]) : '');
       r.append(t, d); r.onclick = () => openContainer(c.id); box.appendChild(r);
     }
     ct.appendChild(box);
@@ -1410,7 +1569,7 @@ function logRow(box, x, d) {
   const k = el('span', 'k ' + c.type), t = el('span', 't'), dd = el('span', 'd');
   t.textContent = c.type === 'inbox' ? 'Added under ' + folderName(c.folderId) : (c.title || 'Untitled');
   const topic = x.sess.map(s => (s.text || '').trim()).filter(Boolean).join(', ');
-  dd.textContent = [c.type === 'meeting' ? 'Meeting' + (x.sess.length ? ' · session' + (topic ? ': ' + topic : '') : '') : c.type === 'document' ? 'Document' : 'Person or project',
+  dd.textContent = [c.type === 'meeting' ? 'Meeting' + (x.sess.length ? ' · session' + (topic ? ': ' + topic : '') : '') : c.type === 'document' ? 'File' : 'Person or project',
     x.n ? plural(x.n, 'note') + ' written or edited' : ''].filter(Boolean).join(' · ');
   r.append(k, t, dd);
   r.title = 'Open';
@@ -1690,7 +1849,7 @@ function renderSearch(ct, focus) {
   const draw = () => {
     res.innerHTML = ''; clearHighlight();
     const q = (S.ui.q || '').trim();
-    if (!q) { cnt.textContent = ''; vEmpty(res, 'Type to search every note, open or done, in meetings, documents and people/project lists. A person or project name also finds the items linked to them.'); return; }
+    if (!q) { cnt.textContent = ''; vEmpty(res, 'Type to search every note, open or done, in meetings, files and people/project lists. A person or project name also finds the items linked to them.'); return; }
     const words = searchWords(q), res2 = words.map(wordRe);
     // titles that match: jump straight there
     const tl = [];
@@ -1732,8 +1891,8 @@ function highlight(root, words) { // marks matches without touching the editable
 function welcome() {
   const w = el('div', 'welcome');
   const M = isMac ? 'Cmd' : 'Ctrl';
-  w.innerHTML = '<h2>Pick a meeting or document, or start one.</h2>' +
-    '<p>Opening a meeting adds today\'s dated session at the top. Drag a bullet\'s dot (or the ⠿ grip that appears beside a row with sub-bullets) onto a person or project in the sidebar to link it, or onto a meeting or document to move it there. Right-click a bullet for dates, links, move and delete.</p>' +
+  w.innerHTML = '<h2>Pick a meeting or file, or start one.</h2>' +
+    '<p>Opening a meeting adds today\'s dated session at the top. Drag a bullet\'s dot (or the ⠿ grip that appears beside a row with sub-bullets) onto a person or project in the sidebar to link it, or onto a meeting or file to move it there. Drop a picture or PDF into a meeting or file to attach it. Right-click a bullet for dates, links, move and delete.</p>' +
     '<table>' + [
       ['Enter', 'New bullet (splits at the cursor)'], ['Tab / Shift+Tab', 'Indent / outdent'],
       [M + '+Enter', 'Check / uncheck'], [M + '+.', 'Collapse / expand'],
@@ -1743,7 +1902,7 @@ function welcome() {
       ['Right-click', 'Dates, links, move to, delete']
     ].map(([k, v]) => '<tr><td><kbd>' + k + '</kbd></td><td>' + v + '</td></tr>').join('') + '</table>';
   const btns = el('p'); const a = el('button', 'primary'); a.textContent = '+ Meeting'; a.onclick = () => createContainer('meeting');
-  const b = el('button'); b.textContent = '+ Document'; b.onclick = () => createContainer('document');
+  const b = el('button'); b.textContent = '+ File'; b.onclick = () => createContainer('document');
   btns.append(a, ' ', b); w.appendChild(btns);
   return w;
 }
@@ -1833,7 +1992,7 @@ function notesItems(ids) { // turn every person/project link on these bullets in
   save(); renderAll(); toast('Made ' + plural(n, 'link') + ' notes, not tasks');
 }
 function shiftBlock(out) {
-  if (S.ui.folder) { toast('Indent in the meeting or document itself; this view mixes several notes', false); return; }
+  if (S.ui.folder) { toast('Indent in the meeting or file itself; this view mixes several notes', false); return; }
   const roots = selRoots(); if (!roots.length) return;
   const rootSet = new Set(roots);
   snap(); let moved = 0;
@@ -2077,6 +2236,7 @@ content.addEventListener('paste', e => {
   e.preventDefault();
   const cd = e.clipboardData || window.clipboardData;
   const html = cd.getData('text/html'), plain = cd.getData('text/plain') || '';
+  if (cd.files && cd.files.length && !plain.trim()) { const b = bulletOf(t); if (S.ui.current && b.containerId === S.ui.current) attachFiles(cd.files, attachTarget(b)); else toast('Paste pictures into a meeting or file', false); return; }
   let lines = normalizeLevels(html ? htmlToLines(html) : plainToLines(plain));
   if (html && lines.length < 2 && /\n/.test(plain.trim())) lines = normalizeLevels(plainToLines(plain));
   if (lines.length <= 1) { document.execCommand('insertText', false, lines.length ? lines[0].text : plain.replace(/\s+/g, ' ')); return; }
@@ -2121,7 +2281,7 @@ content.addEventListener('keydown', e => {
   }
   if (e.key === 'Enter') {
     e.preventDefault();
-    if (t.closest('.node').dataset.flat) { toast('Add notes in the meeting or document itself: click the grey line above this item', false); return; }
+    if (t.closest('.node').dataset.flat) { toast('Add notes in the meeting or file itself: click the grey line above this item', false); return; }
     const pos = getCaret(t), text = t.textContent;
     snap();
     if (b.isSession) { b.collapsed = false; const nb = newBullet(cid, b.id, orderFirst(b.id, cid)); commit(nb.id, 0); return; }
@@ -2142,6 +2302,7 @@ content.addEventListener('keydown', e => {
   if (e.key === 'Backspace' && !mod) {
     const ts = getSelection();
     if (!ts.isCollapsed || getCaret(t) !== 0 || b.isSession) return;
+    if (b.file) { e.preventDefault(); toast('To remove an attachment, right-click it → Delete', false); return; }
     if (isRoot) { // never merge across items from different notes
       if (t.textContent || childList(b.id, cid).length) return;
       e.preventDefault(); snap();
@@ -2266,7 +2427,7 @@ function folderOptions(exclude) {
 function moveOptions(excludeId) {
   const cs = Object.values(S.containers).filter(c => (c.type === 'meeting' || c.type === 'document') && c.id !== excludeId)
     .sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-  return [['meeting', 'Meetings'], ['document', 'Documents']].map(([t, l]) => '<optgroup label="' + l + '">' +
+  return [['meeting', 'Meetings'], ['document', 'Files']].map(([t, l]) => '<optgroup label="' + l + '">' +
     cs.filter(c => c.type === t).map(c => '<option value="' + c.id + '">' + esc(c.title || 'Untitled') + '</option>').join('') + '</optgroup>').join('');
 }
 function tagPop(target, fid, x, y, isBullet) {
@@ -2316,6 +2477,8 @@ content.addEventListener('contextmenu', e => {
     else if (S.containers[S.ui.current]) tagPop(S.containers[S.ui.current], tg.dataset.f, e.clientX, e.clientY, false);
     return;
   }
+  const att = e.target.closest('.att'); // a picture or file: the menu of the bullet it belongs to (long-press on a phone too)
+  if (att) { const b = bulletOf(att); if (b) { e.preventDefault(); bulletPop(b, e.clientX, e.clientY); } return; }
   const oi = e.target.closest('.strip .oi'); // an Open items entry: same menu as the note itself
   if (oi && S.bullets[oi.dataset.id]) { e.preventDefault(); clearSel(); bulletPop(S.bullets[oi.dataset.id], e.clientX, e.clientY); return; }
   const row = e.target.closest('.row'); if (!row) return;
@@ -2486,6 +2649,31 @@ content.addEventListener('drop', e => {
   dropAt = null;
   if (ids.length === 1) { bsel.clear(); commit(ids[0], 'end'); } else { save(); renderAll(); }
 });
+/* files dragged in from the desktop (not Hinay's own drags, which set drag) */
+const hasFiles = e => !drag && e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+window.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); if (!e.target.closest || !e.target.closest('#content')) e.dataTransfer.dropEffect = 'none'; } }); // a missed drop must not open the file in place of Hinay
+window.addEventListener('drop', e => { if (hasFiles(e)) e.preventDefault(); });
+content.addEventListener('dragover', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault(); clearDropMarks();
+  if (!S.ui.current) { e.dataTransfer.dropEffect = 'none'; return; }
+  e.dataTransfer.dropEffect = 'copy';
+  const row = e.target.closest('.outline .row'); if (row) row.classList.add('drop-after');
+});
+content.addEventListener('dragleave', e => { if (hasFiles(e) && !content.contains(e.relatedTarget)) clearDropMarks(); });
+content.addEventListener('drop', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault(); clearDropMarks();
+  if (!S.ui.current) { toast('Drop files into a meeting or file; link that bullet to people or projects from there', false); return; }
+  const row = e.target.closest('.outline .row'), node = !row && e.target.closest('.outline .node');
+  const t = row ? bulletOf(row) : node ? bulletOf(node) : null;
+  attachFiles(e.dataTransfer.files, attachTarget(t));
+});
+let lastTxId = null;
+content.addEventListener('focusin', e => { if (e.target.classList && e.target.classList.contains('tx')) lastTxId = e.target.closest('.node').dataset.id; });
+$('#attachFile').onchange = () => { const f = $('#attachFile'); const t = lastTxId && S.bullets[lastTxId]; attachFiles(f.files, attachTarget(t && t.containerId === S.ui.current ? t : null)); };
+content.addEventListener('click', e => { const a = e.target.closest && e.target.closest('.att'); if (a && !a.classList.contains('missing')) openAtt(a); });
+
 lists.addEventListener('contextmenu', e => {
   const fi = e.target.closest('.item.folder'); if (!fi) return;
   e.preventDefault();
@@ -2542,7 +2730,7 @@ $('#importFile').onchange = e => {
       const o = JSON.parse(r.result);
       if (!o || typeof o.containers !== 'object' || typeof o.bullets !== 'object') throw new Error('Not a backup file');
       const n = Object.values(o.containers).filter(c => c.type !== 'inbox').length, m = Object.keys(o.bullets).length, k = o.folders ? Object.keys(o.folders).length : 0;
-      if (!confirm('Replace everything with this backup (' + n + ' meetings/documents, ' + m + ' bullets, ' + k + ' people/projects)?' + (SY.connected ? '\nThis also replaces your notes in Drive and on your other laptops.' : '') + '\n(Ctrl+Z undoes this.)')) return;
+      if (!confirm('Replace everything with this backup (' + n + ' meetings/files, ' + m + ' bullets, ' + k + ' people/projects)?' + (SY.connected ? '\nThis also replaces your notes in Drive and on your other laptops.' : '') + '\n(Ctrl+Z undoes this.)')) return;
       snap(); S.containers = o.containers; S.bullets = o.bullets; S.folders = o.folders || {}; ensureModel(); S.ui.current = null; S.ui.folder = null; save(); renderAll();
     } catch (err) { alert('Could not import: ' + err.message); }
     e.target.value = '';
