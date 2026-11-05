@@ -1233,15 +1233,19 @@ function renderFolder(ct, f) {
 
   const add = el('input', 'additem'); add.id = 'addItem';
   add.placeholder = '+ Add an item for ' + (f.id === 'me' ? 'yourself' : (f.name || 'this ' + f.kind)) + ', then press Enter';
-  add.addEventListener('keydown', e => {
-    if (e.key !== 'Enter' || !add.value.trim()) return;
-    e.preventDefault(); snap();
+  add.enterKeyHint = 'enter'; // phones: show an Enter key, not "next field" (->|)
+  const addNow = () => {
+    if (!add.value.trim()) return;
+    snap();
     const ib = inboxFor(f.id);
     const b = newBullet(ib.id, null, orderLast(null, ib.id), { text: add.value.trim() });
     b.links = [{ folder: f.id, role: 'primary' }];
     save(); renderAll(); const a2 = $('#addItem'); if (a2) a2.focus();
-  });
-  ct.appendChild(add);
+  };
+  add.addEventListener('keydown', e => { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); addNow(); } });
+  const addForm = el('form', 'addform'); addForm.onsubmit = e => { e.preventDefault(); addNow(); }; // some phone keyboards only submit
+  addForm.appendChild(add);
+  ct.appendChild(addForm);
 
   const roots = folderMembers(f.id);
   const byDate = (a, b) => (effDate(b.b) || '').localeCompare(effDate(a.b) || '') || (a.b.created || '').localeCompare(b.b.created || '') || a.b.order - b.b.order;
@@ -1732,6 +1736,11 @@ content.addEventListener('focusout', e => {
 });
 content.addEventListener('beforeinput', e => {
   if (!e.target.classList || !e.target.classList.contains('tx')) return;
+  if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') { // phone Enter that arrived without a keydown
+    e.preventDefault();
+    e.target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    return;
+  }
   if (!typingSnap) { snap(); typingSnap = true; }
   clearTimeout(typingTimer); typingTimer = setTimeout(() => { typingSnap = false; }, 1500);
 });
@@ -2001,7 +2010,15 @@ content.addEventListener('keydown', e => {
 /* ---------- popovers ---------- */
 const pop = $('#pop');
 let popFor = null;
+let lastTouch = 0, popTouch = false;
+document.addEventListener('pointerdown', e => { if (e.pointerType === 'touch') lastTouch = Date.now(); }, true);
 function placePop(x, y) {
+  popTouch = Date.now() - lastTouch < 2000; // opened by a long-press on a phone
+  if (popTouch) {
+    const a = document.activeElement;
+    if (a && a !== document.body && !pop.contains(a)) a.blur(); // hides the phone keyboard
+    try { getSelection().removeAllRanges(); } catch (e) {}
+  }
   pop.style.display = 'block';
   const w = pop.offsetWidth, h = pop.offsetHeight;
   pop.style.left = Math.min(x, innerWidth - w - 8) + 'px';
@@ -2145,7 +2162,7 @@ pop.addEventListener('click', e => {
   if (r !== undefined) { const b = S.bullets[c.k.slice(2)]; if (b) { snap(); b.text = c.text; save(); renderAll(); } }
   CONF.splice(i, 1); lsSet(CONF_KEY, CONF); showSync(); conflictsPop();
 });
-function closePop() { pop.style.display = 'none'; const id = popFor && popFor.id; popFor = null; if (id) refocus({ id, pos: 'end' }); }
+function closePop() { pop.style.display = 'none'; const id = popFor && popFor.id; popFor = null; if (id && !popTouch) refocus({ id, pos: 'end' }); popTouch = false; }
 document.addEventListener('mousedown', e => { if (pop.style.display === 'block' && !pop.contains(e.target)) closePop(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && pop.style.display === 'block') { closePop(); return; }
