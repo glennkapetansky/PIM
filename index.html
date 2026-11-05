@@ -318,6 +318,7 @@ body.navHidden #content{padding-left:56px}
     <button id="importBtn" title="Restore from a backup file">Import</button>
     <button id="themeBtn" title="Theme">Theme: system</button>
     <button id="reloadBtn" title="Reload the page, e.g. after uploading a new version">↻ Refresh</button>
+    <button id="usage" title="How much of this browser's note storage is used"></button>
     <span id="status">Saved</span>
     <button id="syncBtn" hidden></button>
     <button id="confBtn" hidden title="Edits that a newer edit replaced; restore or dismiss them"></button>
@@ -360,14 +361,39 @@ function hash(str) { // cyrb53: short fingerprint of a record, to notice what ch
 }
 
 /* ---------- state ---------- */
-function blank() { return { version: 2, containers: {}, bullets: {}, folders: {}, ui: { current: null, folder: null, lastExport: null, theme: null } }; }
+function blank() { return { version: 3, containers: {}, bullets: {}, folders: {}, ui: { current: null, folder: null, lastExport: null, theme: null } }; }
+/* Compact records (stage 8): fields at their default value and the id (it is the key) are left out when stored
+   in the browser and in Drive, and put back when read. In memory and in Export every record is complete. */
+const DEFS = {
+  bullets: { parentId: null, text: '', isSession: false, date: null, start: null, end: null, done: false, doneAt: null, links: [], collapsed: false },
+  containers: { title: '', prev: null, next: null, links: [] },
+  folders: { parentId: null, collapsed: false }
+};
+const isDef = (d, k, x) => k in d && (Array.isArray(d[k]) ? Array.isArray(x) && !x.length : d[k] === x);
+function slimRec(coll, v) { const d = DEFS[coll], o = {}; for (const k in v) if (k !== 'id' && v[k] !== undefined && !isDef(d, k, v[k])) o[k] = v[k]; return o; }
+function fullRec(coll, id, v) { const d = DEFS[coll], o = { id }; for (const k in d) o[k] = Array.isArray(d[k]) ? [] : d[k]; return Object.assign(o, v, { id }); }
+const mapColl = (m, f) => { const o = {}; for (const id in m || {}) o[id] = f(id, m[id]); return o; };
+const slimColl = (coll, m) => mapColl(m, (id, v) => slimRec(coll, v));
+const fullColl = (coll, m) => mapColl(m, (id, v) => fullRec(coll, id, v));
+const slimState = st => ({ version: 3, containers: slimColl('containers', st.containers), bullets: slimColl('bullets', st.bullets), folders: slimColl('folders', st.folders), ui: st.ui });
+function stable(x) { return Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : x && typeof x === 'object' ? '{' + Object.keys(x).sort().map(k => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}' : JSON.stringify(x === undefined ? null : x); }
+const recHash = (coll, v) => hash(stable(slimRec(coll, v))); // same record = same fingerprint, whatever its field order or stored form
+let RAW = null; // the record set as an older version stored it, kept only to carry its sync fingerprints over
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) { const o = JSON.parse(raw); if (o && o.containers && o.bullets) { o.ui = o.ui || {}; return o; } }
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && o.containers && o.bullets) {
+        if ((o.version || 0) < 3) RAW = { containers: o.containers, bullets: o.bullets, folders: o.folders || {} };
+        for (const coll of ['containers', 'bullets', 'folders']) o[coll] = fullColl(coll, o[coll]);
+        o.version = 3; o.ui = o.ui || {}; return o;
+      }
+    }
   } catch (e) { /* storage unavailable */ }
   return null;
 }
+function persist() { localStorage.setItem(KEY, JSON.stringify(slimState(S))); }
 const LOADED = load();
 let S = LOADED || blank();
 function ensureModel() {
@@ -386,20 +412,43 @@ function save() {
   setStatus('Saving…');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    try { localStorage.setItem(KEY, JSON.stringify(S)); }
-    catch (e) { setStatus('Save failed. Export a backup now.', true); return; }
+    try { persist(); }
+    catch (e) { setStatus('Save failed. Export a backup now.', true); storageFull(); return; }
     if (stamp()) scheduleSync(3000);
-    showSync();
+    showSync(); showUsage();
   }, 250);
 }
-window.addEventListener('beforeunload', () => { try { localStorage.setItem(KEY, JSON.stringify(S)); stamp(); } catch (e) {} });
+window.addEventListener('beforeunload', () => { try { persist(); stamp(); } catch (e) {} });
+
+/* storage meter (stage 8): notes live in this browser's local storage, about 5 million characters per site
+   (Chrome on Mac and Android). Pictures and files are elsewhere and don't count. Pulses from 70%. */
+const LS_LIMIT = 5242880; // Chrome: 5 MiB of characters per site (measured)
+let fullWarned = false;
+function storageUsed() { let n = 0; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); n += k.length + (localStorage.getItem(k) || '').length; } } catch (e) {} return n; }
+function usageText() {
+  const n = storageUsed(), pct = n / LS_LIMIT * 100;
+  return 'Notes storage in this browser: ' + (n / 1e6).toFixed(2) + ' of 5.24 million characters (' + pct.toFixed(1) + '%).\n\n' +
+    'Pictures and files are kept separately and don\'t count.\n' +
+    (pct >= 70 ? 'Time to move notes to the browser\'s larger storage: ask Claude for that change. Until then, export a backup regularly.'
+      : 'Nothing to do. This turns dark and pulses at 70%, well before it fills.');
+}
+function showUsage() {
+  const b = $('#usage'); if (!b) return;
+  const pct = Math.round(storageUsed() / LS_LIMIT * 100);
+  b.textContent = 'Storage ' + pct + '%'; b.classList.toggle('urgent', pct >= 70);
+  b.title = 'Notes storage used in this browser (pictures not included). Click for details.';
+}
+function storageFull() {
+  const b = $('#usage'); if (b) { b.textContent = 'Storage FULL'; b.classList.add('urgent'); }
+  if (!fullWarned) { fullWarned = true; alert('Hinay could not save: this browser\'s note storage is full.\n\nExport a backup now. Anything typed since the last save is only in this tab until this is fixed. Ask Claude to move notes to the larger storage.'); }
+}
 
 /* ---------- undo / redo ---------- */
 let undoStack = [], redoStack = [], typingSnap = false, typingTimer = null;
-const snapshot = () => JSON.stringify({ c: S.containers, b: S.bullets, f: S.folders });
+const snapshot = () => JSON.stringify({ c: slimColl('containers', S.containers), b: slimColl('bullets', S.bullets), f: slimColl('folders', S.folders) });
 function snap() { undoStack.push(snapshot()); if (undoStack.length > 150) undoStack.shift(); redoStack.length = 0; typingSnap = false; }
 function restoreFrom(str) {
-  const o = JSON.parse(str); S.containers = o.c; S.bullets = o.b; if (o.f) S.folders = o.f; ensureModel();
+  const o = JSON.parse(str); S.containers = fullColl('containers', o.c); S.bullets = fullColl('bullets', o.b); if (o.f) S.folders = fullColl('folders', o.f); ensureModel();
   if (S.ui.current && !S.containers[S.ui.current]) S.ui.current = null;
   if (S.ui.folder && !S.folders[S.ui.folder]) S.ui.folder = null;
   bsel.clear(); selAnchor = selFocus = null; hideToast();
@@ -430,21 +479,41 @@ const COLL = { b: 'bullets', c: 'containers', f: 'folders' };
 function lsGet(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
 function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
 let M = lsGet(META_KEY, null), SY = lsGet(SYNC_KEY, null), CONF = lsGet(CONF_KEY, []), DEV = lsGet(DEV_KEY, null);
-if (!M || !SY || !DEV || !LOADED) {
+const FRESH = !M || !SY || !DEV || !LOADED;
+if (FRESH) {
   // New or reset browser: what's here counts as older than Drive, and the browser gets a fresh identity,
   // so a file it wrote before a reset is read back like another laptop's instead of being overwritten.
   DEV = uid(); M = {};
-  for (const [p, coll] of Object.entries(COLL)) for (const [id, v] of Object.entries(S[coll])) M[p + ':' + id] = { mt: 1, h: hash(JSON.stringify(v)) };
+  for (const [p, coll] of Object.entries(COLL)) for (const [id, v] of Object.entries(S[coll])) M[p + ':' + id] = { mt: 1, h: recHash(coll, v) };
   SY = { base: {}, seen: {}, fileId: null, last: null, connected: !!(SY && SY.connected) };
   lsSet(DEV_KEY, DEV); lsSet(META_KEY, M); lsSet(SYNC_KEY, SY);
 }
 const saveSY = () => lsSet(SYNC_KEY, SY);
+const FMT_KEY = 'eccopim.fmt';
+if (lsGet(FMT_KEY, 0) < 3) {
+  // Stage 8 upgrade, once per browser: fingerprints move to the compact form. A record that still matches the
+  // fingerprint the old version gave it keeps its edit time (so nothing looks newly edited to the other devices);
+  // one that doesn't is a real unsynced edit and is stamped now. Notes then go to a new Drive file
+  // (eccopim-dev2-…) that older open tabs don't read, so they can't misread the compact records.
+  if (RAW && !FRESH) { // a fresh browser already gave every record edit time 1 (older than Drive) above
+    const now = Date.now();
+    for (const [p, coll] of Object.entries(COLL)) for (const id in RAW[coll]) {
+      const k = p + ':' + id, m = M[k], v = S[coll][id]; if (!v) continue;
+      if (m && !m.del && m.h === hash(JSON.stringify(RAW[coll][id]))) m.h = recHash(coll, v);
+      else M[k] = { mt: now, dev: DEV, h: recHash(coll, v) };
+    }
+    lsSet(META_KEY, M);
+  }
+  SY.fileId = null; saveSY();
+  try { persist(); lsSet(FMT_KEY, 3); } catch (e) { /* stays on the old form until a save succeeds */ }
+}
+RAW = null;
 
 // Give every record that changed since the last call a new modified time; deleted ones become tombstones.
 function stamp() {
   const now = Date.now(), live = new Set(); let n = 0;
   for (const [p, coll] of Object.entries(COLL)) for (const [id, v] of Object.entries(S[coll])) {
-    const k = p + ':' + id, h = hash(JSON.stringify(v)), m = M[k]; live.add(k);
+    const k = p + ':' + id, h = recHash(coll, v), m = M[k]; live.add(k);
     if (!m || m.del || m.h !== h) { M[k] = { mt: now, dev: DEV, h }; n++; }
   }
   for (const k of Object.keys(M)) if (!live.has(k) && !M[k].del) { M[k] = { mt: now, dev: DEV, del: true }; n++; }
@@ -485,7 +554,7 @@ async function gfetch(url, opt) {
 }
 const DriveStore = {
   async list() {
-    const q = encodeURIComponent("name contains 'eccopim-dev-' and trashed = false");
+    const q = encodeURIComponent("name contains 'eccopim-dev' and trashed = false"); // eccopim-dev-… (complete records, before stage 8) and eccopim-dev2-… (compact)
     const r = await gfetch(API + '?spaces=appDataFolder&pageSize=100&fields=files(id,name,modifiedTime)&q=' + q);
     return (await r.json()).files || [];
   },
@@ -655,7 +724,7 @@ async function syncNow() {
   if (syncing) { syncAgain = true; return; }
   syncing = true; syncState = 'busy'; showSync();
   try {
-    const mine = 'eccopim-dev-' + DEV + '.json';
+    const mine = 'eccopim-dev2-' + DEV + '.json';
     const files = await store.list();
     let applied = 0;
     for (const f of files) {
@@ -673,10 +742,10 @@ async function syncNow() {
       for (const k in M) {
         const m = M[k];
         if (m.del) rec[k] = { mt: m.mt, dev: m.dev, del: true };
-        else { const v = S[COLL[k[0]]][k.slice(2)]; if (v) rec[k] = { mt: m.mt, dev: m.dev, v }; }
+        else { const v = S[COLL[k[0]]][k.slice(2)]; if (v) rec[k] = { mt: m.mt, dev: m.dev, v: slimRec(COLL[k[0]], v) }; }
       }
       for (const k of dirty) sent[k] = M[k].mt;
-      const data = { app: 'hinay', format: 3, device: DEV, savedAt: new Date().toISOString(), records: rec };
+      const data = { app: 'hinay', format: 4, device: DEV, savedAt: new Date().toISOString(), records: rec };
       let res;
       try { res = await store.write(SY.fileId, mine, data); }
       catch (e) { if (e.status === 404 && SY.fileId) { SY.fileId = null; res = await store.write(null, mine, data); } else throw e; }
@@ -702,14 +771,15 @@ function mergeRemote(recs) {
     if (!coll || !r || typeof r.mt !== 'number' || (!r.del && (!r.v || typeof r.v !== 'object'))) continue;
     const id = k.slice(2), m = M[k], base = SY.base[k] || 0;
     if (m && r.mt === m.mt) continue;
-    const rh = r.del ? null : hash(JSON.stringify(r.v));
+    const rv = r.del ? null : fullRec(coll, id, r.v); // older devices send complete records, newer ones compact: both come out complete
+    const rh = r.del ? null : recHash(coll, rv);
     const same = m ? (m.del ? !!r.del : (!r.del && m.h === rh)) : !!r.del;
     if (m && r.mt < m.mt) { // ours is newer: keep it; if theirs also changed since we last agreed, keep their text
-      if (!same && r.mt > base && !r.del) addConflict(k, r.v, r.mt, 'other', S[coll][id]);
+      if (!same && r.mt > base && !r.del) addConflict(k, rv, r.mt, 'other', S[coll][id]);
       continue;
     }
-    if (m && !same && !m.del && m.mt > base) addConflict(k, S[coll][id], m.mt, 'this', r.del ? null : r.v); // ours changed too but is older
-    if (r.del) delete S[coll][id]; else S[coll][id] = r.v;
+    if (m && !same && !m.del && m.mt > base) addConflict(k, S[coll][id], m.mt, 'this', rv); // ours changed too but is older
+    if (r.del) delete S[coll][id]; else S[coll][id] = rv;
     M[k] = r.del ? { mt: r.mt, dev: r.dev, del: true } : { mt: r.mt, dev: r.dev, h: rh };
     SY.base[k] = r.mt;
     if (!same) n++;
@@ -722,7 +792,7 @@ function afterRemote() {
   if (S.ui.current && !S.containers[S.ui.current]) S.ui.current = null;
   if (S.ui.folder && !S.folders[S.ui.folder]) S.ui.folder = null;
   for (const id of [...bsel]) if (!S.bullets[id]) bsel.delete(id);
-  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+  try { persist(); } catch (e) {}
   if (pop.style.display === 'block') closePop();
   const f = focusInfo(); renderAll(); refocus(f);
 }
@@ -1870,7 +1940,7 @@ function renderSearch(ct, focus) {
     const f = e.target.closest('[data-of]'), c = e.target.closest('[data-oc]');
     if (f) { e.stopPropagation(); openFolder(f.dataset.of); } else if (c) { e.stopPropagation(); openContainer(c.dataset.oc); }
   }, true);
-  box.addEventListener('input', () => { S.ui.q = box.value; searchAll = false; clearTimeout(searchTimer); searchTimer = setTimeout(() => { draw(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }, 150); });
+  box.addEventListener('input', () => { S.ui.q = box.value; searchAll = false; clearTimeout(searchTimer); searchTimer = setTimeout(() => { draw(); try { persist(); } catch (e) {} }, 150); });
   box.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchTimer); draw(); } if (e.key === 'ArrowDown') { const t = res.querySelector('.tx'); if (t) { e.preventDefault(); t.focus(); setCaret(t, 'end'); } } });
   hd.onchange = () => { S.ui.qHideDone = hd.checked; save(); draw(); };
   draw();
@@ -2704,7 +2774,7 @@ try { if (localStorage.getItem('eccopim.navHidden')) document.body.classList.add
 narrowMQ.addEventListener && narrowMQ.addEventListener('change', () => { document.body.classList.remove('navOpen'); syncNavBtn(); });
 syncNavBtn();
 $('#reloadBtn').textContent = '↻ Refresh (' + (isMac ? '⌘R' : 'Ctrl+R') + ')';
-$('#reloadBtn').onclick = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); stamp(); } catch (e) {} location.reload(); };
+$('#reloadBtn').onclick = () => { try { persist(); stamp(); } catch (e) {} location.reload(); };
 $('#newMeeting').onclick = () => createContainer('meeting');
 $('#newDoc').onclick = () => createContainer('document');
 $('#filter').addEventListener('input', renderSidebar);
@@ -2721,6 +2791,7 @@ function exportData() {
   S.ui.lastExport = new Date().toISOString(); save(); renderBanner();
 }
 $('#exportBtn').onclick = exportData;
+$('#usage').onclick = () => alert(usageText());
 $('#importBtn').onclick = () => $('#importFile').click();
 $('#importFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return;
@@ -2731,7 +2802,7 @@ $('#importFile').onchange = e => {
       if (!o || typeof o.containers !== 'object' || typeof o.bullets !== 'object') throw new Error('Not a backup file');
       const n = Object.values(o.containers).filter(c => c.type !== 'inbox').length, m = Object.keys(o.bullets).length, k = o.folders ? Object.keys(o.folders).length : 0;
       if (!confirm('Replace everything with this backup (' + n + ' meetings/files, ' + m + ' bullets, ' + k + ' people/projects)?' + (SY.connected ? '\nThis also replaces your notes in Drive and on your other laptops.' : '') + '\n(Ctrl+Z undoes this.)')) return;
-      snap(); S.containers = o.containers; S.bullets = o.bullets; S.folders = o.folders || {}; ensureModel(); S.ui.current = null; S.ui.folder = null; save(); renderAll();
+      snap(); S.containers = fullColl('containers', o.containers); S.bullets = fullColl('bullets', o.bullets); S.folders = fullColl('folders', o.folders || {}); ensureModel(); S.ui.current = null; S.ui.folder = null; save(); renderAll();
     } catch (err) { alert('Could not import: ' + err.message); }
     e.target.value = '';
   };
@@ -2761,6 +2832,7 @@ setInterval(() => { if (!document.hidden && (token || syncState === 'ok')) syncN
 let shownDay = todayISO(); // after midnight, Today and the badge move to the new day
 setInterval(() => { if (todayISO() === shownDay) return; shownDay = todayISO(); renderSidebar(); if (curView() && curView() !== 'search' && !focusInfo()) renderMain(); }, 60000);
 showSync();
+showUsage();
 if (token) syncNow();
 })();
 </script>
