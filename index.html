@@ -219,7 +219,7 @@ input[type="checkbox"]{accent-color:var(--accent)}
 #toast button{color:inherit;border-color:currentColor;padding:1px 10px}
 #toast button:hover{background:transparent;opacity:.8}
 
-/* Sidebar views (Today, Calendar, Search) */
+/* Sidebar views (Today, Timeline, Search) */
 .item.nav .t::before{display:none}
 .item.nav .ic{width:14px;flex:0 0 14px;text-align:center;color:var(--muted)}
 .item .cnt.late{background:var(--err);color:var(--bg)}
@@ -235,7 +235,7 @@ input[type="checkbox"]{accent-color:var(--accent)}
 @media (max-width:760px){.att{margin-left:30px;max-width:calc(100% - 34px)}.att.img img{max-height:240px}}
 .row.late .tx,.row.late .meta{color:var(--err)}
 
-/* Day view and calendar */
+/* Day view */
 .dtitle{font-size:20px;font-weight:650;padding:2px 0}
 .dnav{display:inline-flex;gap:4px;align-items:center}
 .dnav button{padding:0 8px}
@@ -260,22 +260,6 @@ body.rkdragging,body.rkdragging *{cursor:grabbing!important;user-select:none!imp
 .vlink .k{width:7px;height:7px;border-radius:50%;flex:0 0 7px;align-self:center;background:var(--doc)}
 .vlink .k.meeting{background:var(--session)} .vlink .k.inbox{background:var(--per)}
 .vlink .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-left:1px solid var(--line);border-top:1px solid var(--line);max-width:1400px;-webkit-user-select:none;user-select:none}
-.cal .wd{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600;padding:3px 6px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--panel)}
-.cal .cell{min-height:104px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:2px 4px 4px;cursor:pointer;min-width:0}
-.cal .cell:hover{background:var(--hover)}
-.cal .cell.out{background:var(--panel)}
-.cal .cell.out .dn{color:var(--faint)}
-.cal .dn{font-size:12px;color:var(--muted);font-weight:600;display:inline-block;padding:0 5px;border-radius:9px;margin-bottom:1px}
-.cal .cell.today .dn{background:var(--accent);color:var(--bg)}
-.cal .ev{font-size:12px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:3px;padding:0 3px}
-.cal .ev:hover{background:var(--accent-bg)}
-.cal .ev.s{color:var(--session);font-weight:600}
-.cal .ev.s::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--session);margin-right:4px;vertical-align:1px}
-.cal .ev.late{color:var(--err)}
-.cal .ev.d{color:var(--done);text-decoration:line-through}
-.cal .more{font-size:11.5px;color:var(--muted);padding:0 3px}
-.cal .more:hover{color:var(--accent);text-decoration:underline}
 
 /* Search */
 .sbox{width:100%;max-width:1100px;font-size:16px;padding:5px 10px;border-radius:7px}
@@ -865,7 +849,7 @@ function effDate(b) {
   if (b.created) return isoOf(new Date(b.created));
   const c = S.containers[b.containerId]; return c ? c.created : null;
 }
-/* Dates of an item, for Today and the calendar. start+end = a range; start only ("from") = open-ended,
+/* Dates of an item, for Today and the Timeline. start+end = a range; start only ("from") = open-ended,
    active from its start until checked; end only ("by") = a due date on that one day. */
 const dayOf = ts => isoOf(new Date(ts));
 const addDays = (s, n) => { const d = parseISO(s); d.setDate(d.getDate() + n); return isoOf(d); };
@@ -1249,8 +1233,7 @@ function renderSidebar() {
   }
   { // views
     const v = curView(), tc = todayCount();
-    const navs = [['today', '◷', 'Today', v === 'today' && !(S.ui.day && S.ui.day !== todayISO())],
-      ['calendar', '▦', 'Calendar', v === 'calendar' || (v === 'today' && S.ui.day && S.ui.day !== todayISO())],
+    const navs = [['today', '◷', 'Today', v === 'today'],
       ['timeline', '▤', 'Timeline', v === 'timeline'],
       ['search', '⌕', 'Search', v === 'search']];
     for (const [id, ic, label, cur] of navs) {
@@ -1261,7 +1244,7 @@ function renderSidebar() {
       if (id === 'today' && tc.n) { const d = el('span', 'cnt' + (tc.late ? ' late' : '')); d.textContent = tc.n; d.title = plural(tc.n, 'item') + ' active today' + (tc.late ? ', ' + tc.late + ' overdue' : ''); it.appendChild(d); }
       if (id === 'search') it.title = 'Search all notes (' + (isMac ? '⌘K' : 'Ctrl+K') + ')';
       it.onclick = id === 'search' ? () => { goView('search'); const b = $('#srchQ'); if (b) { b.focus(); b.select(); } }
-        : () => goView(id, id === 'today' ? { day: null } : id === 'calendar' ? { month: null } : { tlFrom: null });
+        : () => goView(id, id === 'today' ? { day: null } : { tlFrom: null });
       lists.appendChild(it);
     }
   }
@@ -1386,8 +1369,7 @@ function renderMain() {
   if (!c) {
     S.ui.current = null;
     const v = curView();
-    if (v === 'calendar') renderCalendar(ct);
-    else if (v === 'timeline') renderTimeline(ct);
+    if (v === 'timeline') renderTimeline(ct);
     else if (v === 'search') { renderSearch(ct, false); if (sq) { const b = $('#srchQ'); b.focus(); b.setSelectionRange(sq[0], sq[1]); } }
     else renderDay(ct);
     return;
@@ -1611,7 +1593,7 @@ function syncNavBtn() {
 }
 function closeNav() { if (document.body.classList.contains('navOpen')) { document.body.classList.remove('navOpen'); syncNavBtn(); } }
 
-/* ---------- views: Today (any day), Calendar, Search ---------- */
+/* ---------- views: Today (any day), Search ---------- */
 function goView(view, opts) {
   closeNav();
   if (S.ui.current) cleanupEmptySession(S.ui.current);
@@ -1620,7 +1602,7 @@ function goView(view, opts) {
   Object.assign(S.ui, opts || {});
   save(); renderAll(); $('#main').scrollTop = 0;
 }
-const curView = () => (S.ui.current || S.ui.folder) ? null : (S.ui.view || 'today');
+const curView = () => (S.ui.current || S.ui.folder) ? null : (['timeline', 'search'].includes(S.ui.view) ? S.ui.view : 'today'); // anything else (incl. the removed Calendar) = Today
 function todayCount() { // overdue + active today, for the sidebar badge
   const t = todayISO(); let n = 0, late = 0;
   for (const b of Object.values(S.bullets)) {
@@ -1668,8 +1650,7 @@ function renderDay(ct) {
   nav.append(mk('‹', 'Previous day', () => goView('today', { day: addDays(d, -1) })));
   if (!isToday) nav.append(mk('Today', 'Back to today', () => goView('today', { day: null })));
   nav.append(mk('›', 'Next day', () => goView('today', { day: addDays(d, 1) })));
-  const cal = el('button', 'go'); cal.textContent = 'Month view'; cal.onclick = () => goView('calendar', { month: d.slice(0, 7) });
-  sub.append(ds, nav, cal);
+  sub.append(ds, nav);
   head.appendChild(sub); ct.appendChild(head);
 
   const all = liveItems(), dated = all.filter(b => b.start || b.end);
@@ -1756,63 +1737,6 @@ function placeRank(id, i) { // i = position in My order (Infinity = end); null =
   const m = $('#main'), top = m.scrollTop; save(); renderSidebar(); renderMain(); m.scrollTop = top;
 }
 
-function renderCalendar(ct) {
-  const today = todayISO(), mon = /^\d{4}-\d{2}$/.test(S.ui.month || '') ? S.ui.month : today.slice(0, 7);
-  const first = parseISO(mon + '-01'), y = first.getFullYear(), m = first.getMonth();
-  const head = el('div', 'head');
-  const tt = el('div', 'dtitle'); tt.textContent = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-  head.appendChild(tt);
-  const sub = el('div', 'sub');
-  const shift = n => isoOf(new Date(y, m + n, 1)).slice(0, 7);
-  const nav = el('span', 'dnav');
-  const mk = (txt, title, fn) => { const b = el('button'); b.textContent = txt; b.title = title; b.onclick = fn; return b; };
-  nav.append(mk('‹', 'Previous month', () => goView('calendar', { month: shift(-1) })));
-  if (mon !== today.slice(0, 7)) nav.append(mk('This month', 'Back to this month', () => goView('calendar', { month: null })));
-  nav.append(mk('›', 'Next month', () => goView('calendar', { month: shift(1) })));
-  const key = el('span'); key.textContent = 'Meeting sessions in purple · open items on their start, end or due date · checked items are hidden · click a day for all of it, including what was completed';
-  sub.append(nav, key); head.appendChild(sub); ct.appendChild(head);
-
-  const start = new Date(y, m, 1 - first.getDay()), days = [];
-  for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); days.push(isoOf(d)); }
-  while (days.length > 35 && days[days.length - 7].slice(0, 7) !== mon) days.splice(days.length - 7, 7);
-  const lo = days[0], hi = days[days.length - 1], ev = {};
-  const put = (d, e) => { if (d >= lo && d <= hi) (ev[d] = ev[d] || []).push(e); };
-  for (const b of Object.values(S.bullets)) {
-    const c = S.containers[b.containerId]; if (!c) continue;
-    if (b.isSession) { if (!treeEmpty(b.id)) put(b.date, { k: 's', o: 0, b, text: (c.title || 'Untitled') + ((b.text || '').trim() ? ' · ' + b.text.trim() : '') }); continue; }
-    if (!(b.text || '').trim() || b.done) continue; // checked items leave the calendar (the day view still lists them)
-    if (b.start || b.end) {
-      const late = isLate(b);
-      if (b.start && b.end && b.start !== b.end) { put(b.start, { k: 'i', o: 1, b, pre: '▸ ', tip: 'Starts', late }); put(b.end, { k: 'i', o: 1, b, pre: '◂ ', tip: 'Ends', late }); }
-      else if (b.start && !b.end) put(b.start, { k: 'i', o: 1, b, pre: '▸ ', tip: 'From', late });
-      else put(b.end || b.start, { k: 'i', o: 1, b, pre: '• ', tip: 'Due', late });
-    }
-  }
-  const grid = el('div', 'cal');
-  for (let i = 0; i < 7; i++) { const w = el('div', 'wd'); w.textContent = parseISO(days[i]).toLocaleDateString(undefined, { weekday: 'short' }); grid.appendChild(w); }
-  const MAX = 4;
-  for (const d of days) {
-    const cell = el('div', 'cell' + (d.slice(0, 7) !== mon ? ' out' : '') + (d === today ? ' today' : ''));
-    cell.title = 'Open ' + fmtLong(d);
-    const dn = el('span', 'dn'); dn.textContent = parseISO(d).getDate(); cell.appendChild(dn);
-    const list = (ev[d] || []).sort((a, b) => a.o - b.o || (a.b.done - b.b.done));
-    for (const e of list.slice(0, list.length > MAX + 1 ? MAX : MAX + 1)) {
-      const x = el('div', 'ev ' + e.k + (e.late && e.k === 'i' ? ' late' : '') + (e.k === 'i' && e.b.done ? ' d' : ''));
-      x.textContent = (e.pre || '') + (e.text || e.b.text);
-      x.title = (e.tip ? e.tip + ': ' : '') + (e.text || e.b.text) + (e.k === 's' ? '' : '\n' + srcLabel(e.b)) + (e.late ? '\nOverdue' : '');
-      x.onclick = ev2 => {
-        ev2.stopPropagation();
-        if (e.k === 's') { openContainer(e.b.containerId); e.b.collapsed = false; reveal(e.b.id); }
-        else goToSource(e.b);
-      };
-      cell.appendChild(x);
-    }
-    if (list.length > MAX + 1) { const mo = el('div', 'more'); mo.textContent = '+' + (list.length - MAX) + ' more'; cell.appendChild(mo); }
-    cell.onclick = () => goView('today', { day: d === today ? null : d });
-    grid.appendChild(cell);
-  }
-  ct.appendChild(grid);
-}
 
 /* ---------- Timeline (stage 6): dated items by project, as bars (start–end) and markers (single date) ---------- */
 const dayNum = s => { const [y, m, d] = s.split('-').map(Number); return Math.round(Date.UTC(y, m - 1, d) / 864e5); };
