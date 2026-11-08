@@ -46,8 +46,6 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 #side .top{padding:12px 12px 6px;display:flex;align-items:center;gap:6px}
 #side .brand{font-weight:700;letter-spacing:.2px;flex:1;border:none;padding:0;background:none;text-align:left;cursor:pointer}
 #side .brand:hover{background:none;color:var(--accent)}
-#side .new{display:flex;gap:6px;padding:0 12px 8px}
-#side .new button{flex:1}
 #filter{margin:0 12px 8px;width:calc(100% - 24px)}
 #lists{flex:1;overflow:auto;padding-bottom:8px}
 .sec{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:10px 14px 3px;font-weight:600}
@@ -65,6 +63,7 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 .fsec .add{border:none;padding:0 6px;font-size:15px;line-height:1;color:var(--muted)}
 .fsec .add:hover{color:var(--text)}
 .item.folder{padding-right:10px}
+.item[data-cid]{padding-left:29px} /* meetings and files: dots line up with people and projects (8px + the 15px +/− slot + gap) */
 .item.folder .ftw{width:15px;flex:0 0 15px;color:var(--muted);font-size:10px;cursor:pointer;align-self:center;display:flex;align-items:center}
 /* expand/collapse for sub-folders: a boxed + / − (a bare + already means "add" in the section headers) */
 .item.folder .ftw.tog{box-sizing:border-box;width:13px;flex:0 0 13px;height:13px;margin-right:2px;justify-content:center;border:1.5px solid var(--muted);border-radius:3px;color:var(--text);font-size:12px;font-weight:800;line-height:1;background:var(--bg)}
@@ -132,8 +131,6 @@ input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid va
 
 /* Main */
 #main{flex:1;height:100%;overflow:auto;display:flex;flex-direction:column}
-#banner{background:var(--warn-bg);color:var(--warn);font-size:12.5px;padding:5px 24px;display:flex;gap:10px;align-items:center}
-#banner[hidden]{display:none}
 #content{padding:16px 28px 120px;width:100%}
 .head .title{font-size:20px;font-weight:650;border:none;background:transparent;width:100%;padding:2px 0;outline:none}
 .head .title::placeholder{color:var(--faint)}
@@ -219,15 +216,15 @@ input[type="checkbox"]{accent-color:var(--accent)}
 #toast button{color:inherit;border-color:currentColor;padding:1px 10px}
 #toast button:hover{background:transparent;opacity:.8}
 
-/* Sidebar views (Today, Timeline, Search) */
+/* Sidebar views (Glenn To-Do, Timeline, Search) */
 .item.nav .t::before{display:none}
 .item.nav .ic{width:14px;flex:0 0 14px;text-align:center;color:var(--muted)}
 .item .cnt.late{background:var(--err);color:var(--bg)}
 .pill.late{background:transparent;color:var(--err);border:1px solid currentColor;line-height:15px}
 .row.late{box-shadow:inset 2px 0 0 var(--err)}
 .att{margin:2px 0 6px 44px;display:inline-flex;flex-direction:column;gap:3px;max-width:calc(100% - 52px);cursor:pointer;color:var(--muted);font-size:12px}
-.att.img img{display:block;max-width:min(560px,100%);max-height:320px;border-radius:6px;border:1px solid var(--line, rgba(0,0,0,.12));background:var(--hover)}
-.att:not(.img) .fname{color:var(--link, var(--accent));font-size:13px}
+.att.img img{display:block;max-width:min(560px,100%);max-height:320px;border-radius:6px;border:1px solid var(--line);background:var(--hover)}
+.att:not(.img) .fname{color:var(--accent);font-size:13px}
 .att:hover .fname{text-decoration:underline}
 .att.missing{cursor:default}.att.missing:hover .fname{text-decoration:none}
 .att.missing.img img{display:none}
@@ -300,11 +297,7 @@ body.navHidden #content{padding-left:56px}
 <button id="menuBtn" title="Hide / show the sidebar" aria-label="Menu" aria-expanded="true">☰</button>
 <div id="navShade"></div>
 <aside id="side">
-  <div class="top"><button id="homeBtn" class="brand" title="Home">Hinay</button></div>
-  <div class="new">
-    <button id="newMeeting" title="New meeting item">+ Meeting</button>
-    <button id="newDoc" title="New file: a notes page with no dates, for pictures, PDFs and reference notes">+ File</button>
-  </div>
+  <div class="top"><button id="homeBtn" class="brand" title="Home: your To-Do">Hinay</button></div>
   <input id="filter" placeholder="Filter titles…" autocomplete="off">
   <div id="lists"></div>
   <div class="foot">
@@ -320,7 +313,6 @@ body.navHidden #content{padding-left:56px}
   </div>
 </aside>
 <main id="main">
-  <div id="banner" hidden></div>
   <div id="content"></div>
 </main>
 <div id="pop"></div>
@@ -345,6 +337,7 @@ const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.cla
 const $ = s => document.querySelector(s);
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+const MOD = isMac ? 'Cmd' : 'Ctrl', UNDO_HINT = '\n(' + MOD + '+Z undoes this.)'; // shortcut names as this computer writes them
 function hash(str) { // cyrb53: short fingerprint of a record, to notice what changed
   let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
   for (let i = 0; i < str.length; i++) { const ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
@@ -380,7 +373,8 @@ function load() {
       if (o && o.containers && o.bullets) {
         if ((o.version || 0) < 3) RAW = { containers: o.containers, bullets: o.bullets, folders: o.folders || {} };
         for (const coll of ['containers', 'bullets', 'folders']) o[coll] = fullColl(coll, o[coll]);
-        o.version = 3; o.ui = o.ui || {}; return o;
+        o.version = 3; o.ui = o.ui || {}; delete o.ui.theme; delete o.ui.month; // Theme switch and Calendar were removed
+        return o;
       }
     }
   } catch (e) { /* storage unavailable */ }
@@ -811,7 +805,7 @@ function showSync() {
     default: msg = n ? 'Saving to Drive…' : 'Synced with Drive' + (SY.last ? ' ' + new Date(SY.last).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
   }
   setStatus(msg, err);
-  renderBanner();
+  showBackupDue();
   const b = $('#syncBtn'); b.hidden = !btn; if (btn) b.textContent = btn;
   b.classList.toggle('urgent', syncState === 'auth');
   const c = $('#confBtn'); c.hidden = !CONF.length; c.textContent = 'Conflicts (' + CONF.length + ')';
@@ -838,9 +832,10 @@ function newBullet(cid, pid, order, extra) {
   const b = Object.assign({ id: uid(), containerId: cid, parentId: pid || null, order, text: '', isSession: false, date: null, start: null, end: null, done: false, doneAt: null, links: [], collapsed: false, created: new Date().toISOString() }, extra || {});
   S.bullets[b.id] = b; return b;
 }
-function deleteTree(id) { for (const k of Object.values(S.bullets).filter(x => x.parentId === id)) deleteTree(k.id); delete S.bullets[id]; }
-function countTree(id) { return 1 + Object.values(S.bullets).filter(x => x.parentId === id).reduce((a, k) => a + countTree(k.id), 0); }
-function treeEmpty(id) { const b = S.bullets[id]; if ((b.text || '').trim() || b.file) return false; return Object.values(S.bullets).filter(x => x.parentId === id).every(k => treeEmpty(k.id)); }
+const kidsOf = id => Object.values(S.bullets).filter(x => x.parentId === id); // any order; childList gives sibling order
+function deleteTree(id) { for (const k of kidsOf(id)) deleteTree(k.id); delete S.bullets[id]; }
+function countTree(id) { return 1 + kidsOf(id).reduce((a, k) => a + countTree(k.id), 0); }
+function treeEmpty(id) { const b = S.bullets[id]; if ((b.text || '').trim() || b.file) return false; return kidsOf(id).every(k => treeEmpty(k.id)); }
 function sessionsOf(cid) { return Object.values(S.bullets).filter(b => b.containerId === cid && b.isSession); }
 // a bullet is task-like when it is checked, has dates, or has a link that isn't a note link
 function hasTask(b) { return !!(b.done || b.start || b.end || (b.links || []).some(l => !l.note)); }
@@ -856,13 +851,14 @@ const addDays = (s, n) => { const d = parseISO(s); d.setDate(d.getDate() + n); r
 function spanOf(b) { if (!b.start && !b.end) return null; return { s: b.start || b.end, e: b.end || (b.start ? '9999-12-31' : b.end) }; }
 const onDay = (b, d) => { const r = spanOf(b); return !!r && r.s <= d && d <= r.e; };
 const isLate = b => !b.done && !!b.end && b.end < todayISO();
+const dateText = b => b.start && b.end ? (b.start === b.end ? fmt(b.start) : fmt(b.start) + ' – ' + fmt(b.end)) : b.start ? 'from ' + fmt(b.start) : 'by ' + fmt(b.end);
 // Keep only items with no ancestor in the same list: a listed child shows inside its listed parent.
 function topOnly(list) {
   const ids = new Set(list.map(r => r.b.id));
   return list.filter(r => { let p = r.b.parentId ? S.bullets[r.b.parentId] : null; while (p) { if (ids.has(p.id)) return false; p = p.parentId ? S.bullets[p.parentId] : null; } return true; });
 }
 const liveItems = () => Object.values(S.bullets).filter(b => !b.isSession && S.containers[b.containerId] && (b.text || '').trim());
-function setContainerDeep(b, cid) { b.containerId = cid; for (const k of Object.values(S.bullets)) if (k.parentId === b.id) setContainerDeep(k, cid); }
+function setContainerDeep(b, cid) { b.containerId = cid; for (const k of kidsOf(b.id)) setContainerDeep(k, cid); }
 // Put bullets ids (in order) under parentId at sibling index k (counted without the moved ones).
 function placeAt(ids, parentId, cid, k) {
   const moving = new Set(ids);
@@ -968,6 +964,7 @@ function newFolder(kind, parentId) {
   openFolder(f.id, true);
 }
 function openFolder(fid, focusTitle) {
+  if (fid === 'me') { goView('today', { day: null }); return; } // Me's list is Glenn To-Do
   closeNav();
   if (S.ui.current) cleanupEmptySession(S.ui.current);
   bsel.clear(); selAnchor = selFocus = null;
@@ -1003,11 +1000,11 @@ function rehomeInbox(fid, target) { // target: send everything there (merge); ot
 }
 function deleteFolder(fid) {
   const f = S.folders[fid]; if (!f || fid === 'me') return;
-  const fate = inboxFate(fid), Z = isMac ? 'Cmd+Z' : 'Ctrl+Z';
+  const fate = inboxFate(fid);
   if (!confirm('Delete "' + (f.name || 'Untitled') + '"?\n\nLinks to it are removed; notes stay in their meetings and files.' +
     (fate.keep ? '\n' + plural(fate.keep, 'item') + ' typed directly into it and also linked elsewhere will move there.' : '') +
     (fate.lose ? '\n' + plural(fate.lose, 'item') + ' typed directly into it and linked nowhere else will be DELETED. To keep everything, Cancel and use "Merge into…" instead.' : '') +
-    (folderKids(fid).length ? '\nIts sub-folders move up one level.' : '') + '\n(' + Z + ' undoes this.)')) return;
+    (folderKids(fid).length ? '\nIts sub-folders move up one level.' : '') + UNDO_HINT)) return;
   snap();
   rehomeInbox(fid, null);
   for (const k of folderKids(fid)) k.parentId = f.parentId;
@@ -1036,7 +1033,7 @@ function mergeFolder(fid, into) {
   for (const k of folderKids(fid)) k.parentId = into;
   delete S.folders[fid];
   g.collapsed = false;
-  if (S.ui.folder === fid) S.ui.folder = into;
+  if (S.ui.folder === fid) S.ui.folder = into === 'me' ? null : into;
   save(); renderAll(); flashFolder(into);
   toast('Merged ' + (f.name || 'Untitled') + ' into ' + (g.name || 'Untitled') + ' (' + plural(n, 'link') + ' moved)');
 }
@@ -1162,7 +1159,7 @@ function setChain(a, field, bId) {
   }
 }
 function deleteContainer(c) {
-  if (!confirm('Delete "' + (c.title || 'Untitled') + '" and all its notes?\n(Ctrl+Z undoes this.)')) return;
+  if (!confirm('Delete "' + (c.title || 'Untitled') + '" and all its notes?' + UNDO_HINT)) return;
   snap();
   for (const b of Object.values(S.bullets)) if (b.containerId === c.id) delete S.bullets[b.id];
   setChain(c, 'prev', null); setChain(c, 'next', null);
@@ -1210,85 +1207,91 @@ function caretAtEdge(node, up) {
 function commit(focusId, pos) { save(); renderSidebar(); renderMain(); refocus({ id: focusId, pos }); }
 
 /* ---------- rendering ---------- */
-function renderAll() { renderSidebar(); renderBanner(); renderMain(); }
+function renderAll() { renderSidebar(); showBackupDue(); renderMain(); }
 
+const TODO_LABEL = 'Glenn To-Do'; // the Today view and the Me folder, combined (Nov 8)
 function renderSidebar() {
   const q = $('#filter').value.trim().toLowerCase();
   const lists = $('#lists'); lists.innerHTML = '';
-  const last = {};
-  for (const b of Object.values(S.bullets)) if (b.isSession && (!last[b.containerId] || b.date > last[b.containerId])) last[b.containerId] = b.date;
-  const byRecent = (a, b) => (last[b.id] || b.created).localeCompare(last[a.id] || a.created);
-  const mtgDate = c => fmt(last[c.id] || c.created);
-  function containerRow(c, padLeft, dateFn) {
-    const it = el('div', 'item k-' + c.type + (c.id === S.ui.current ? ' cur' : '')); it.dataset.cid = c.id;
-    if (padLeft != null) it.style.paddingLeft = padLeft + 'px';
-    it.title = (c.title || 'Untitled') + ' · drop bullets here to move them' + (c.type === 'meeting' ? ' · drag onto a person or project to link all its sessions' : '');
-    if (c.type === 'meeting') it.draggable = true;
-    if (padLeft != null) it.appendChild(el('span', 'ftw'));
-    const t = el('span', 't'); t.textContent = c.title || 'Untitled';
-    const d = el('span', 'd'); d.textContent = dateFn(c);
-    it.append(t, d);
-    it.onclick = () => openContainer(c.id);
-    lists.appendChild(it);
-  }
-  { // views
+  const note = text => { const e = el('div', 'empty-note'); e.textContent = text; lists.appendChild(e); };
+  const section = (label, addTitle, onAdd, kind) => { // a heading with + to add one, like People and Projects
+    const h = el('div', 'sec fsec'); if (kind) h.dataset.kind = kind;
+    const lab = el('span'); lab.textContent = label;
+    const add = el('button', 'add'); add.textContent = '+'; add.title = addTitle; add.onclick = onAdd;
+    h.append(lab, add); lists.appendChild(h);
+  };
+  { // views: Glenn To-Do (the day view, home), Timeline, Search
     const v = curView(), tc = todayCount();
-    const navs = [['today', '◷', 'Today', v === 'today'],
-      ['timeline', '▤', 'Timeline', v === 'timeline'],
-      ['search', '⌕', 'Search', v === 'search']];
-    for (const [id, ic, label, cur] of navs) {
-      const it = el('div', 'item nav' + (cur ? ' cur' : '')); it.dataset.view = id;
+    for (const [id, ic, label] of [['today', '◷', TODO_LABEL], ['timeline', '▤', 'Timeline'], ['search', '⌕', 'Search']]) {
+      const it = el('div', 'item nav' + (v === id ? ' cur' : '')); it.dataset.view = id;
       const i = el('span', 'ic'); i.textContent = ic;
       const t = el('span', 't'); t.textContent = label;
       it.append(i, t);
-      if (id === 'today' && tc.n) { const d = el('span', 'cnt' + (tc.late ? ' late' : '')); d.textContent = tc.n; d.title = plural(tc.n, 'item') + ' active today' + (tc.late ? ', ' + tc.late + ' overdue' : ''); it.appendChild(d); }
-      if (id === 'search') it.title = 'Search all notes (' + (isMac ? '⌘K' : 'Ctrl+K') + ')';
-      it.onclick = id === 'search' ? () => { goView('search'); const b = $('#srchQ'); if (b) { b.focus(); b.select(); } }
-        : () => goView(id, id === 'today' ? { day: null } : { tlFrom: null });
+      if (id === 'today') {
+        it.title = 'Your to-do list, in your order · drop bullets here to add them';
+        if (tc.n) { const d = el('span', 'cnt' + (tc.late ? ' late' : '')); d.textContent = tc.n; d.title = plural(tc.n, 'item') + ' due or active today' + (tc.late ? ', ' + tc.late + ' overdue' : ''); it.appendChild(d); }
+        it.onclick = () => goView('today', { day: null });
+      } else if (id === 'search') {
+        it.title = 'Search all notes (' + (isMac ? '⌘K' : 'Ctrl+K') + ')';
+        it.onclick = () => { goView('search'); const b = $('#srchQ'); if (b) { b.focus(); b.select(); } };
+      } else it.onclick = () => goView('timeline', { tlFrom: null });
       lists.appendChild(it);
     }
   }
-  for (const kind of ['person', 'project']) {
-    const h = el('div', 'sec fsec'); h.dataset.kind = kind;
-    const lab = el('span'); lab.textContent = KIND_LABEL[kind];
-    const add = el('button', 'add'); add.textContent = '+'; add.title = 'New ' + (kind === 'person' ? 'person' : 'project');
-    add.onclick = () => newFolder(kind, null);
-    h.append(lab, add); lists.appendChild(h);
+  const folderSection = kind => {
+    section(KIND_LABEL[kind], 'New ' + kind, () => newFolder(kind, null), kind);
     const rows = [];
     if (q) {
-      for (const f of Object.values(S.folders)) if (f.kind === kind && (f.name || '').toLowerCase().includes(q)) rows.push([f, 0]);
+      for (const f of Object.values(S.folders)) if (f.kind === kind && f.id !== 'me' && (f.name || '').toLowerCase().includes(q)) rows.push([f, 0]);
       rows.sort((a, b) => (a[0].name || '').localeCompare(b[0].name || ''));
-    } else (function walk(pid, depth) { for (const f of folderKids(pid, kind)) { rows.push([f, depth]); if (!f.collapsed) walk(f.id, depth + 1); } })(null, 0);
-    if (!rows.length) { const e = el('div', 'empty-note'); e.textContent = q ? 'No matches' : 'Click + to add one'; lists.appendChild(e); }
+    } else (function walk(pid, depth) {
+      for (const f of folderKids(pid, kind)) {
+        if (f.id === 'me') { walk(f.id, depth); continue; } // Me is the To-Do at the top; anyone nested under it shows here
+        rows.push([f, depth]); if (!f.collapsed) walk(f.id, depth + 1);
+      }
+    })(null, 0);
+    if (!rows.length) note(q ? 'No matches' : 'Click + to add one');
     for (const [f, depth] of rows) {
       const it = el('div', 'item folder k-' + f.kind + (f.id === S.ui.folder ? ' cur' : '')); it.dataset.fid = f.id; it.draggable = true;
       it.style.paddingLeft = (8 + depth * 20) + 'px'; // a child's dot sits right of its parent's dot
       it.title = folderPath(f.id) + ' · drop bullets here to link them';
-      const tw = el('span', 'ftw'); const hasKids = !q && folderKids(f.id).length > 0;
-      tw.textContent = hasKids ? (f.collapsed ? '+' : '−') : '';
-      if (hasKids) { tw.classList.add('tog'); tw.title = f.collapsed ? 'Show sub-folders' : 'Hide sub-folders'; }
-      if (hasKids) tw.onclick = ev => { ev.stopPropagation(); f.collapsed = !f.collapsed; save(); renderSidebar(); };
-      const t = el('span', 't'); t.textContent = (f.name || 'Untitled') + (f.id === 'me' ? ' (To-Do)' : '');
+      const tw = el('span', 'ftw'), hasKids = !q && folderKids(f.id).length > 0;
+      if (hasKids) {
+        tw.textContent = f.collapsed ? '+' : '−'; tw.classList.add('tog'); tw.title = f.collapsed ? 'Show sub-folders' : 'Hide sub-folders';
+        tw.onclick = ev => { ev.stopPropagation(); f.collapsed = !f.collapsed; save(); renderSidebar(); };
+      }
+      const t = el('span', 't'); t.textContent = f.name || 'Untitled';
       it.append(tw, t);
       const n = openCount(f.id);
-      if (n) { const d = el('span', 'cnt'); d.textContent = n; d.title = n + ' open item' + (n > 1 ? 's' : ''); it.appendChild(d); }
+      if (n) { const d = el('span', 'cnt'); d.textContent = n; d.title = plural(n, 'open item'); it.appendChild(d); }
       it.onclick = () => openFolder(f.id);
       lists.appendChild(it);
     }
-  }
-  const all = Object.values(S.containers).filter(c => !q || (c.title || 'untitled').toLowerCase().includes(q));
-  const sections = [
-    ['Meetings', all.filter(c => c.type === 'meeting').sort(byRecent), mtgDate, 'None yet'],
-    ['Files', all.filter(c => c.type === 'document').sort((a, b) => (a.title || '').localeCompare(b.title || '')), () => '', 'None yet']
-  ];
-  for (const [name, items, dateFn, none] of sections) {
-    const h = el('div', 'sec'); h.textContent = name; lists.appendChild(h);
-    if (!items.length) { const e = el('div', 'empty-note'); e.textContent = q ? 'No matches' : none; lists.appendChild(e); }
-    for (const c of items) containerRow(c, null, dateFn);
-  }
+  };
+  const last = {}; // a meeting's latest session date
+  for (const b of Object.values(S.bullets)) if (b.isSession && (!last[b.containerId] || b.date > last[b.containerId])) last[b.containerId] = b.date;
+  const containerSection = (type, label, addTitle, sort, dateFn) => {
+    section(label, addTitle, () => createContainer(type));
+    const items = Object.values(S.containers).filter(c => c.type === type && (!q || (c.title || 'untitled').toLowerCase().includes(q))).sort(sort);
+    if (!items.length) note(q ? 'No matches' : 'Click + to add one');
+    for (const c of items) {
+      const it = el('div', 'item k-' + c.type + (c.id === S.ui.current ? ' cur' : '')); it.dataset.cid = c.id;
+      it.title = (c.title || 'Untitled') + ' · drop bullets here to move them' + (type === 'meeting' ? ' · drag onto a person or project to link all its sessions' : '');
+      if (type === 'meeting') it.draggable = true;
+      const t = el('span', 't'); t.textContent = c.title || 'Untitled';
+      const d = el('span', 'd'); d.textContent = dateFn(c);
+      it.append(t, d);
+      it.onclick = () => openContainer(c.id);
+      lists.appendChild(it);
+    }
+  };
+  folderSection('person');
+  containerSection('meeting', 'Meetings', 'New meeting', (a, b) => (last[b.id] || b.created).localeCompare(last[a.id] || a.created), c => fmt(last[c.id] || c.created));
+  folderSection('project');
+  containerSection('document', 'Files', 'New file: a notes page with no dates, for pictures, PDFs and reference notes', (a, b) => (a.title || '').localeCompare(b.title || ''), () => '');
 }
 
-function renderBanner() {
+function showBackupDue() {
   // Backup reminder: the Export button turns dark and pulses when a backup is due
   // (monthly once Drive sync runs; weekly while notes live only in this browser).
   const last = S.ui.lastExport ? new Date(S.ui.lastExport) : null;
@@ -1317,9 +1320,8 @@ function metaHTML(b, kidCount) {
   const parts = [];
   for (const l of sortedLinks(b)) if (l.folder !== S.ui.folder) parts.push(tagHTML(l));
   if (b.start || b.end) {
-    const r = b.start && b.end ? (b.start === b.end ? fmt(b.start) : fmt(b.start) + ' – ' + fmt(b.end)) : (b.start ? 'from ' + fmt(b.start) : 'by ' + fmt(b.end));
     const late = isLate(b);
-    parts.push('<span class="pill' + (late ? ' late' : '') + '" title="' + (late ? 'Overdue · ' : '') + 'Right-click to change dates">' + r + '</span>');
+    parts.push('<span class="pill' + (late ? ' late' : '') + '" title="' + (late ? 'Overdue · ' : '') + 'Right-click to change dates">' + dateText(b) + '</span>');
   }
   if (b.done && b.doneAt) parts.push('<span title="Completed ' + esc(new Date(b.doneAt).toLocaleString()) + '">✓ ' + fmt(isoOf(new Date(b.doneAt))) + '</span>');
   if (b.collapsed && kidCount) parts.push('<span>(' + kidCount + ')</span>');
@@ -1331,7 +1333,7 @@ function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted 
   const n = el('div', 'node'); n.dataset.id = b.id; if (flat) n.dataset.flat = '1';
   const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : '') + (flat && isLate(b) ? ' late' : '') + (bsel.has(b.id) ? ' sel' : '')); // flat = day view: overdue rows red
   const tw = el('span', 'tw');
-  if (kids.length) { tw.textContent = b.collapsed ? '+' : '−'; tw.classList.add('has'); tw.title = (b.collapsed ? 'Click: show sub-bullets' : 'Click: hide sub-bullets') + ' (' + (isMac ? 'Cmd' : 'Ctrl') + '+.)'; }
+  if (kids.length) { tw.textContent = b.collapsed ? '+' : '−'; tw.classList.add('has'); tw.title = (b.collapsed ? 'Click: show sub-bullets' : 'Click: hide sub-bullets') + ' (' + MOD + '+.)'; }
   else tw.textContent = b.isSession ? '' : '•';
   if (!b.isSession) { tw.draggable = true; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag: onto a person or project to link, onto a meeting or file to move, or within the notes to reorder'; }
   else { tw.draggable = true; tw.textContent = tw.textContent || '•'; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag onto a person or project to link this whole session'; }
@@ -1341,7 +1343,7 @@ function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted 
     const d = el('span', 'sdate'); d.textContent = fmtLong(b.date); d.title = 'Click to change the date or delete this session'; row.appendChild(d);
   } else {
     const ck = el('input', 'ck' + (hasTask(b) ? ' show' : '')); ck.type = 'checkbox'; ck.checked = !!b.done; ck.tabIndex = -1;
-    ck.title = 'Done (Ctrl+Enter)'; row.appendChild(ck);
+    ck.title = 'Done (' + MOD + '+Enter)'; row.appendChild(ck);
   }
   const tx = el('div', 'tx'); tx.contentEditable = 'true'; tx.spellcheck = true;
   tx.dataset.ph = b.isSession ? 'Session topic (optional)' : '';
@@ -1349,7 +1351,7 @@ function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted 
   row.appendChild(tx);
   const meta = el('span', 'meta'); meta.innerHTML = metaHTML(b, kids.length) + (flat && allKids.length ? '<span title="Sub-bullets; open the note to see them">(+' + allKids.length + ')</span>' : ''); row.appendChild(meta);
   n.appendChild(row);
-  if (b.file) { row.classList.add('hasfile'); tx.dataset.ph = 'Caption'; n.appendChild(attEl(b)); }
+  if (b.file) { tx.dataset.ph = 'Caption'; n.appendChild(attEl(b)); }
   if (kids.length && !b.collapsed) { const k = el('div', 'kids'); for (const c of kids) k.appendChild(nodeEl(c, idx)); n.appendChild(k); }
   return n;
 }
@@ -1364,17 +1366,21 @@ function renderMain() {
   const ct = $('#content');
   const a = document.activeElement, sq = a && a.id === 'srchQ' ? [a.selectionStart, a.selectionEnd] : null; // keep typing in Search across redraws
   ct.innerHTML = ''; clearHighlight();
-  if (S.ui.folder && S.folders[S.ui.folder]) { renderFolder(ct, S.folders[S.ui.folder]); return; }
+  if (S.ui.folder && S.ui.folder !== 'me' && S.folders[S.ui.folder]) { renderFolder(ct, S.folders[S.ui.folder]); return; } // Me's list is Glenn To-Do (the day view)
   const c = S.ui.current && S.containers[S.ui.current];
   if (!c) {
     S.ui.current = null;
     const v = curView();
     if (v === 'timeline') renderTimeline(ct);
-    else if (v === 'search') { renderSearch(ct, false); if (sq) { const b = $('#srchQ'); b.focus(); b.setSelectionRange(sq[0], sq[1]); } }
+    else if (v === 'search') { renderSearch(ct); if (sq) { const b = $('#srchQ'); b.focus(); b.setSelectionRange(sq[0], sq[1]); } }
     else renderDay(ct);
     return;
   }
+  renderContainer(ct, c);
+}
 
+/* a meeting or file: header (title, project, people, chain, attach, merge, delete), Open items, the outline */
+function renderContainer(ct, c) {
   const head = el('div', 'head');
   const title = el('input', 'title'); title.value = c.title || ''; title.placeholder = c.type === 'meeting' ? 'Meeting title' : 'File title';
   title.addEventListener('focus', () => snap());
@@ -1465,13 +1471,15 @@ const viewOpen = {}; // which collapsible view sections are expanded (per sessio
 function srcLabel(b) {
   const c = S.containers[b.containerId];
   if (!c) return '';
-  if (c.type === 'inbox') return (c.folderId === S.ui.folder ? 'Added here' : 'Added under ' + folderName(c.folderId)) + ' · ' + fmt(effDate(b), { month: 'short', day: 'numeric', year: 'numeric' });
+  if (c.type === 'inbox') return inboxLabel(c) + ' · ' + fmt(effDate(b), { month: 'short', day: 'numeric', year: 'numeric' });
   const s = sessionOf(b), topic = s && (s.text || '').trim();
   return (c.title || 'Untitled') + ' · ' + fmtLong(effDate(b)) + (topic ? ' · ' + topic : '');
 }
+// where an item typed into a folder (or into Glenn To-Do) was added
+const inboxLabel = c => c.folderId === 'me' ? 'Added to ' + TODO_LABEL : c.folderId === S.ui.folder ? 'Added here' : 'Added under ' + folderName(c.folderId);
 function goToSource(b) {
   const c = S.containers[b.containerId]; if (!c) return;
-  if (c.type === 'inbox') { if (c.folderId !== S.ui.folder) openFolder(c.folderId); return; }
+  if (c.type === 'inbox') { if (c.folderId !== S.ui.folder && !(c.folderId === 'me' && curView() === 'today')) openFolder(c.folderId); return; }
   openContainer(c.id); reveal(b.id);
 }
 function renderFolder(ct, f) {
@@ -1482,40 +1490,17 @@ function renderFolder(ct, f) {
   title.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); const a = $('#addItem'); if (a) a.focus(); } });
   head.appendChild(title);
   const sub = el('div', 'sub');
-  const k = el('span'); k.textContent = (f.id === 'me' ? 'Person · your To-Do list' : f.kind === 'person' ? 'Person' : 'Project') + (f.parentId ? ' · in ' + folderPath(f.parentId) : '');
+  const k = el('span'); k.textContent = (f.kind === 'person' ? 'Person' : 'Project') + (f.parentId ? ' · in ' + folderPath(f.parentId) : '');
   sub.appendChild(k);
   const addSub = el('button', 'go'); addSub.textContent = '+ sub-folder'; addSub.title = 'Nest a ' + (f.kind === 'person' ? 'person' : 'project') + ' under this one'; addSub.onclick = () => newFolder(f.kind, f.id);
   sub.appendChild(addSub);
-  if (f.id !== 'me') {
-    const mg = el('button', 'del'); mg.textContent = 'Merge into…'; mg.title = 'Move everything in this ' + f.kind + ' to another one, then delete this one';
-    mg.onclick = e => { const r = mg.getBoundingClientRect(); mergePop(f.id, r.left, r.bottom + 4); e.stopPropagation(); };
-    const del = el('button', 'del'); del.textContent = 'Delete'; del.onclick = () => deleteFolder(f.id);
-    sub.append(mg, del);
-  }
+  const mg = el('button', 'del'); mg.textContent = 'Merge into…'; mg.title = 'Move everything in this ' + f.kind + ' to another one, then delete this one';
+  mg.onclick = e => { const r = mg.getBoundingClientRect(); mergePop(f.id, r.left, r.bottom + 4); e.stopPropagation(); };
+  const del = el('button', 'del'); del.textContent = 'Delete'; del.onclick = () => deleteFolder(f.id);
+  sub.append(mg, del);
   head.appendChild(sub); ct.appendChild(head);
+  addBox(ct, f.id, '+ Add an item for ' + (f.name || 'this ' + f.kind) + ', then press Enter');
 
-  const add = el('textarea', 'additem'); add.id = 'addItem'; add.rows = 1; // a textarea so pasted line breaks survive
-  add.placeholder = '+ Add an item for ' + (f.id === 'me' ? 'yourself' : (f.name || 'this ' + f.kind)) + ', then press Enter';
-  add.enterKeyHint = 'enter'; // phones: show an Enter key, not "next field" (->|)
-  const addNow = () => { // first line = the item; any further lines = its sub-bullets
-    const lines = rebase(normalizeLevels(plainToLines(add.value)));
-    add.value = ''; // clear first, so a second input event can't add it again
-    if (!lines.length) return;
-    snap();
-    const ib = inboxFor(f.id);
-    const b = newBullet(ib.id, null, orderLast(null, ib.id), { text: lines[0].text });
-    b.links = [{ folder: f.id, role: 'primary' }];
-    if (lines.length > 1) insertLines(rebase(lines.slice(1).map(l => ({ text: l.text, level: l.level }))), { cid: ib.id, parent: b.id, after: null, reuse: null, atEnd: true });
-    save(); renderAll(); const a2 = $('#addItem'); if (a2) a2.focus();
-  };
-  add.addEventListener('input', () => {
-    if (/\n/.test(add.value)) { addNow(); return; } // a paste with line breaks, or an Enter the keydown missed
-    add.style.height = 'auto'; add.style.height = (add.scrollHeight + 2) + 'px'; // grow as a long note wraps
-  });
-  add.addEventListener('keydown', e => { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); addNow(); } });
-  const addForm = el('form', 'addform'); addForm.onsubmit = e => { e.preventDefault(); addNow(); }; // some phone keyboards only submit
-  addForm.appendChild(add);
-  ct.appendChild(addForm);
 
   const roots = folderMembers(f.id);
   const byDate = (a, b) => (effDate(b.b) || '').localeCompare(effDate(a.b) || '') || (a.b.created || '').localeCompare(b.b.created || '') || a.b.order - b.b.order;
@@ -1531,7 +1516,7 @@ function renderFolder(ct, f) {
   const header = (key, label, n, collapsible, defOpen) => vHeader(ct, f.id + key, label, n, collapsible, defOpen);
   const items = (list, dim) => vItems(ct, list, dim);
 
-  header('open', f.id === 'me' ? 'To-Do' : 'Open', pri.length, false);
+  header('open', 'Open', pri.length, false);
   if (pri.length) items(pri, false);
   else {
     const e = el('div', 'vempty');
@@ -1539,7 +1524,7 @@ function renderFolder(ct, f) {
     ct.appendChild(e);
   }
   if (notes.length && header('notes', 'Meeting notes', notes.length, true, true)) items(notes, false);
-  if (sec.length && header('sec', 'Also involves ' + (f.id === 'me' ? 'me' : (f.name || 'this')), sec.length, true, true)) items(sec, true);
+  if (sec.length && header('sec', 'Also involves ' + (f.name || 'this'), sec.length, true, true)) items(sec, true);
   if (header('mtg', 'Meetings & files', linked.length, true, false)) {
     const box = el('div', 'outline');
     if (!linked.length) { const e = el('div', 'vempty'); e.textContent = f.kind === 'person' ? 'Add ' + (f.name || 'this person') + ' as an attendee on a meeting to list it here.' : 'Set a meeting\'s Project to list it here.'; box.appendChild(e); }
@@ -1552,6 +1537,31 @@ function renderFolder(ct, f) {
     ct.appendChild(box);
   }
   if (header('done', 'Done', done.length, true, false) && done.length) items(done, false);
+}
+
+/* The box at the top of a person or project (and of Glenn To-Do, for Me) for typing an item straight in.
+   It lives in that folder's hidden inbox, linked to it. A textarea, so pasted line breaks survive:
+   the first line is the item, further lines its sub-bullets. */
+function addBox(ct, fid, placeholder) {
+  const add = el('textarea', 'additem'); add.id = 'addItem'; add.rows = 1; add.placeholder = placeholder;
+  add.enterKeyHint = 'enter'; // phones: show an Enter key, not "next field" (->|)
+  const addNow = () => {
+    const lines = rebase(normalizeLevels(plainToLines(add.value)));
+    add.value = ''; // clear first, so a second input event can't add it again
+    if (!lines.length) return;
+    snap();
+    const ib = inboxFor(fid);
+    const b = newBullet(ib.id, null, orderLast(null, ib.id), { text: lines[0].text, links: [{ folder: fid, role: 'primary' }] });
+    if (lines.length > 1) insertLines(rebase(lines.slice(1)), { cid: ib.id, parent: b.id, after: null, reuse: null, atEnd: true });
+    save(); renderAll(); const a2 = $('#addItem'); if (a2) a2.focus();
+  };
+  add.addEventListener('input', () => {
+    if (/\n/.test(add.value)) { addNow(); return; } // a paste with line breaks, or an Enter the keydown missed
+    add.style.height = 'auto'; add.style.height = (add.scrollHeight + 2) + 'px'; // grow as a long note wraps
+  });
+  add.addEventListener('keydown', e => { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); addNow(); } });
+  const form = el('form', 'addform'); form.onsubmit = e => { e.preventDefault(); addNow(); }; // some phone keyboards only submit
+  form.appendChild(add); ct.appendChild(form);
 }
 
 /* Shared pieces of the gathered views (person/project, Today, Search): a section header that can
@@ -1567,7 +1577,7 @@ function vHeader(ct, key, label, n, collapsible, defOpen, cls) {
 }
 function vItems(ct, list, dim, flat) {
   const g = el('div', 'outline vgroup' + (dim ? ' dim' : ''));
-  const idxCache = new Map(), idxOf = cid => { if (!idxCache.has(cid)) idxCache.set(cid, kidsIndex(cid)); return idxCache.get(cid); };
+  const idxOf = idxCacher();
   let lastSrc = null;
   for (const r of list) {
     const lab = srcLabel(r.b);
@@ -1580,6 +1590,8 @@ function vItems(ct, list, dim, flat) {
   ct.appendChild(g);
   return g;
 }
+const navBtn = (txt, title, fn) => { const b = el('button'); b.textContent = txt; b.title = title; b.onclick = fn; return b; };
+function idxCacher() { const m = new Map(); return cid => { if (!m.has(cid)) m.set(cid, kidsIndex(cid)); return m.get(cid); }; } // child lists per container, built once per render
 function vEmpty(ct, text) { const e = el('div', 'vempty'); e.textContent = text; ct.appendChild(e); }
 
 /* ---------- sidebar toggle ---------- */
@@ -1593,7 +1605,7 @@ function syncNavBtn() {
 }
 function closeNav() { if (document.body.classList.contains('navOpen')) { document.body.classList.remove('navOpen'); syncNavBtn(); } }
 
-/* ---------- views: Today (any day), Search ---------- */
+/* ---------- views: the day view (today = Glenn To-Do), Timeline, Search ---------- */
 function goView(view, opts) {
   closeNav();
   if (S.ui.current) cleanupEmptySession(S.ui.current);
@@ -1625,7 +1637,7 @@ function dayLog(d) { // meetings, documents and folders where something was writ
 function logRow(box, x, d) {
   const c = x.c, r = el('div', 'vlink');
   const k = el('span', 'k ' + c.type), t = el('span', 't'), dd = el('span', 'd');
-  t.textContent = c.type === 'inbox' ? 'Added under ' + folderName(c.folderId) : (c.title || 'Untitled');
+  t.textContent = c.type === 'inbox' ? inboxLabel(c) : (c.title || 'Untitled');
   const topic = x.sess.map(s => (s.text || '').trim()).filter(Boolean).join(', ');
   dd.textContent = [c.type === 'meeting' ? 'Meeting' + (x.sess.length ? ' · session' + (topic ? ': ' + topic : '') : '') : c.type === 'document' ? 'File' : 'Person or project',
     x.n ? plural(x.n, 'note') + ' written or edited' : ''].filter(Boolean).join(' · ');
@@ -1641,17 +1653,17 @@ function logRow(box, x, d) {
 function renderDay(ct) {
   const today = todayISO(), d = S.ui.day && S.ui.day !== today ? S.ui.day : today, isToday = d === today;
   const head = el('div', 'head');
-  const tt = el('div', 'dtitle'); tt.textContent = isToday ? 'Today' : parseISO(d).toLocaleDateString(undefined, { weekday: 'long' });
+  const tt = el('div', 'dtitle'); tt.textContent = isToday ? TODO_LABEL : parseISO(d).toLocaleDateString(undefined, { weekday: 'long' });
   head.appendChild(tt);
   const sub = el('div', 'sub');
   const ds = el('span'); ds.textContent = parseISO(d).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const nav = el('span', 'dnav');
-  const mk = (txt, title, fn) => { const b = el('button'); b.textContent = txt; b.title = title; b.onclick = fn; return b; };
-  nav.append(mk('‹', 'Previous day', () => goView('today', { day: addDays(d, -1) })));
-  if (!isToday) nav.append(mk('Today', 'Back to today', () => goView('today', { day: null })));
-  nav.append(mk('›', 'Next day', () => goView('today', { day: addDays(d, 1) })));
+  nav.append(navBtn('‹', 'Previous day', () => goView('today', { day: addDays(d, -1) })));
+  if (!isToday) nav.append(navBtn('Today', 'Back to today', () => goView('today', { day: null })));
+  nav.append(navBtn('›', 'Next day', () => goView('today', { day: addDays(d, 1) })));
   sub.append(ds, nav);
   head.appendChild(sub); ct.appendChild(head);
+  if (isToday) addBox(ct, 'me', '+ Add a to-do, then press Enter (it lands in To rank)');
 
   const all = liveItems(), dated = all.filter(b => b.start || b.end);
   const k = 'day:';
@@ -1691,15 +1703,12 @@ function pruneRanks(pool) { // quietly (no undo step): ranks of items that left 
   if (n) save();
 }
 const byRank = (a, b) => a.rank - b.rank;
-function toRankOrder(a, b) { // overdue first, then by the day they matter, then undated (oldest first)
-  const ka = a.start || a.end ? (isLate(a) ? '0' + a.end : '1' + spanOf(a).s) : '2' + (a.created || '');
-  const kb = b.start || b.end ? (isLate(b) ? '0' + b.end : '1' + spanOf(b).s) : '2' + (b.created || '');
-  return ka.localeCompare(kb);
-}
+const rankKey = b => b.start || b.end ? (isLate(b) ? '0' + b.end : '1' + spanOf(b).s) : '2' + (b.created || '');
+const toRankOrder = (a, b) => rankKey(a).localeCompare(rankKey(b)); // overdue first, then by the day they matter, then undated (oldest first)
 function renderRanked(ct, d) {
   const pool = todayPool(d); pruneRanks(pool);
   const items = [...pool.values()], ranked = items.filter(b => b.rank != null).sort(byRank), fresh = items.filter(b => b.rank == null).sort(toRankOrder);
-  const idxCache = new Map(), idxOf = cid => { if (!idxCache.has(cid)) idxCache.set(cid, kidsIndex(cid)); return idxCache.get(cid); };
+  const idxOf = idxCacher();
   const zone = (name, list, emptyText) => {
     const z = el('div', 'outline vgroup rkzone'); z.dataset.zone = name;
     if (!list.length) { const e = el('div', 'rkempty'); e.textContent = emptyText; z.appendChild(e); }
@@ -1711,7 +1720,7 @@ function renderRanked(ct, d) {
   if (h1) zone('torank', fresh, 'Nothing new to rank. Drag an item here to take it out of your order.');
   vHeader(ct, 'day:mine', 'My order', ranked.length, false);
   ct.lastChild.dataset.zone = 'ranked';
-  zone('ranked', ranked, fresh.length ? 'Drag items here from To rank by their ⠿ handle, in the order you want to do them.' : 'Nothing on your plate today. Items show up in To rank when they are overdue, active today, start within 7 days, or are open and linked to Me.');
+  zone('ranked', ranked, fresh.length ? 'Drag items here from To rank by their ⠿ handle, in the order you want to do them.' : 'Nothing on your plate today. Items show up in To rank when they are overdue, active today or start within 7 days, and when you add them above or drop them on ' + TODO_LABEL + ' in the sidebar.');
 }
 function rankItem(b, idxOf) { // no buttons: placing and reordering is by dragging the ⠿ handle
   const w = el('div', 'rkit'); w.dataset.id = b.id;
@@ -1760,11 +1769,10 @@ function renderTimeline(ct) {
   const tt = el('div', 'dtitle'); tt.textContent = 'Timeline'; head.appendChild(tt);
   const sub = el('div', 'sub');
   const nav = el('span', 'dnav');
-  const mk = (txt, title, fn) => { const b = el('button'); b.textContent = txt; b.title = title; b.onclick = fn; return b; };
   const step = Math.max(7, Math.round(N / 3 / 7) * 7);
-  nav.append(mk('‹', 'Earlier', () => goView('timeline', { tlFrom: addDays(from, -step) })));
-  nav.append(mk('Today', 'Back to today', () => goView('timeline', { tlFrom: null })));
-  nav.append(mk('›', 'Later', () => goView('timeline', { tlFrom: addDays(from, step) })));
+  nav.append(navBtn('‹', 'Earlier', () => goView('timeline', { tlFrom: addDays(from, -step) })));
+  nav.append(navBtn('Today', 'Back to today', () => goView('timeline', { tlFrom: null })));
+  nav.append(navBtn('›', 'Later', () => goView('timeline', { tlFrom: addDays(from, step) })));
   const span = el('select'); span.title = 'How much time to show';
   for (const [w, lab] of TL_SPANS) { const o = el('option'); o.value = w; o.textContent = lab; if (w === weeks) o.selected = true; span.appendChild(o); }
   span.onchange = () => goView('timeline', { tlWeeks: +span.value });
@@ -1841,8 +1849,7 @@ function renderTimeline(ct) {
       const lab = el('div', 'lab'); lab.textContent = b.text.trim();
       const who = liveLinks(b).filter(l => !l.note && S.folders[l.folder].kind === 'person').map(l => folderName(l.folder));
       if (who.length) { const w = el('span', 'who'); w.textContent = who.join(', '); lab.appendChild(w); }
-      const dates = b.start && b.end ? (b.start === b.end ? fmt(b.start) : fmt(b.start) + ' – ' + fmt(b.end)) : b.start ? 'from ' + fmt(b.start) : 'by ' + fmt(b.end);
-      const tip = b.text.trim() + '\n' + dates + (late ? ' · overdue' : '') + (b.done ? ' · done' : '') + '\n' + srcLabel(b) + (who.length ? '\n' + who.join(', ') : '');
+      const tip = b.text.trim() + '\n' + dateText(b) + (late ? ' · overdue' : '') + (b.done ? ' · done' : '') + '\n' + srcLabel(b) + (who.length ? '\n' + who.join(', ') : '');
       lab.title = tip; lab.onclick = () => goToSource(b);
       const trk = el('div', 'trk'); lines(trk);
       let x;
@@ -1883,7 +1890,7 @@ function runSearch(q) {
   }
   return topOnly(hits).sort((a, b) => (effDate(b.b) || '').localeCompare(effDate(a.b) || '') || a.b.order - b.b.order);
 }
-function renderSearch(ct, focus) {
+function renderSearch(ct) {
   const head = el('div', 'head');
   const tt = el('div', 'dtitle'); tt.textContent = 'Search'; head.appendChild(tt);
   const box = el('input', 'sbox'); box.id = 'srchQ'; box.type = 'search'; box.autocomplete = 'off';
@@ -1901,7 +1908,7 @@ function renderSearch(ct, focus) {
     const words = searchWords(q), res2 = words.map(wordRe);
     // titles that match: jump straight there
     const tl = [];
-    for (const f of Object.values(S.folders)) if (res2.every(w => w.test(f.name || ''))) tl.push('<span class="tag ' + f.kind + '" data-of="' + f.id + '">' + esc(f.name || 'Untitled') + '</span>');
+    for (const f of Object.values(S.folders)) if (res2.every(w => w.test(f.name || ''))) tl.push('<span class="tag ' + f.kind + '" data-of="' + f.id + '">' + esc(f.id === 'me' ? TODO_LABEL : f.name || 'Untitled') + '</span>');
     for (const c of Object.values(S.containers)) if (c.type !== 'inbox' && res2.every(w => w.test(c.title || ''))) tl.push('<span class="tag ' + (c.type === 'meeting' ? 'meeting' : 'doc') + '" data-oc="' + c.id + '">' + esc(c.title || 'Untitled') + '</span>');
     if (tl.length) { const h = el('div', 'shits'); h.innerHTML = '<span class="lab">Open:</span>' + tl.join(''); res.appendChild(h); }
     let list = runSearch(q);
@@ -1922,7 +1929,6 @@ function renderSearch(ct, focus) {
   box.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchTimer); draw(); } if (e.key === 'ArrowDown') { const t = res.querySelector('.tx'); if (t) { e.preventDefault(); t.focus(); setCaret(t, 'end'); } } });
   hd.onchange = () => { S.ui.qHideDone = hd.checked; save(); draw(); };
   draw();
-  if (focus) { box.focus(); box.select(); }
 }
 function clearHighlight() { try { if (window.CSS && CSS.highlights) CSS.highlights.delete('srch'); } catch (e) {} }
 function highlight(root, words) { // marks matches without touching the editable text (CSS Custom Highlight API; skipped where unsupported)
@@ -1938,13 +1944,12 @@ function highlight(root, words) { // marks matches without touching the editable
 
 function welcome() {
   const w = el('div', 'welcome');
-  const M = isMac ? 'Cmd' : 'Ctrl';
   w.innerHTML = '<h2>Pick a meeting or file, or start one.</h2>' +
-    '<p>Opening a meeting adds today\'s dated session at the top. Drag a bullet\'s dot (or the ⠿ grip that appears beside a row with sub-bullets) onto a person or project in the sidebar to link it, or onto a meeting or file to move it there. Drop a picture or PDF into a meeting or file to attach it. Right-click a bullet for dates, links, move and delete.</p>' +
+    '<p>Opening a meeting adds today\'s dated session at the top. Drag a bullet\'s dot (or the ⠿ grip that appears beside a row with sub-bullets) onto ' + TODO_LABEL + ' in the sidebar to put it on your to-do list, onto a person or project to link it, or onto a meeting or file to move it there. Drop a picture or PDF into a meeting or file to attach it. Right-click a bullet for dates, links, move and delete.</p>' +
     '<table>' + [
       ['Enter', 'New bullet (splits at the cursor)'], ['Tab / Shift+Tab', 'Indent / outdent'],
-      [M + '+Enter', 'Check / uncheck'], [M + '+.', 'Collapse / expand'],
-      [M + '+↑ / ' + M + '+↓', 'Move bullet'], [M + '+Z / ' + M + '+Shift+Z', 'Undo / redo'],
+      [MOD + '+Enter', 'Check / uncheck'], [MOD + '+.', 'Collapse / expand'],
+      [MOD + '+↑ / ' + MOD + '+↓', 'Move bullet'], [MOD + '+Z / ' + MOD + '+Shift+Z', 'Undo / redo'],
       ['Drag across bullets', 'Select a block'],
       ['With a block selected', 'Delete, Tab / Shift+Tab, drag a dot, or right-click'],
       ['Right-click', 'Dates, links, move to, delete']
@@ -2024,6 +2029,23 @@ function linkItems(ids, fid, label) {
   if (!label && ids.every(id => S.bullets[id].isSession)) label = n === 1 ? 'the ' + fmtLong(S.bullets[ids[0]].date) + ' session' : plural(n, 'session');
   toast('Linked ' + (label || plural(n, 'item')) + ' to ' + folderName(fid));
 }
+/* Glenn To-Do: dropping an item there (or typing it in) links it to Me as a task. It then waits in To rank,
+   unless it is checked or dated more than 7 days out (then it arrives 7 days before its date). */
+function addToTodo(ids) {
+  ids = ids.filter(id => S.bullets[id] && !S.bullets[id].isSession); if (!ids.length) return;
+  snap(); let n = 0;
+  for (const id of ids) {
+    const b = S.bullets[id], had = (b.links || []).find(x => x.folder === 'me');
+    if (had && !had.note) continue;
+    if (!had) addLink(b, 'me');
+    delete b.links.find(x => x.folder === 'me').note; n++; // a task link, even on a picture or an existing note link
+  }
+  if (!n) { undoStack.pop(); toast('Already on your To-Do', false); return; }
+  save(); renderAll();
+  const it = document.querySelector('.item[data-view="today"]'); if (it) it.classList.add('flash');
+  const pool = todayPool(todayISO()), later = ids.filter(id => !pool.has(id)).length;
+  toast('Added ' + plural(ids.length, 'item') + ' to ' + TODO_LABEL + (later ? '; ' + later + (later === 1 ? ' is' : ' are') + ' checked or dated over a week out, so ' + (later === 1 ? 'it shows' : 'they show') + ' later' : ''));
+}
 function setDoneItems(ids, val) {
   snap(); const now = new Date().toISOString();
   for (const id of ids) {
@@ -2091,6 +2113,9 @@ content.addEventListener('mousedown', e => {
   if (a && document.activeElement !== a.closest('.tx')) e.preventDefault();
 });
 content.addEventListener('click', e => {
+  if (e.target.classList.contains('sdate')) { sessionPop(bulletOf(e.target), e.clientX, e.clientY); return; }
+  const att = e.target.closest('.att');
+  if (att) { if (!att.classList.contains('missing')) openAtt(att); return; }
   const x = e.target.closest('.tag .x');
   if (x) { // remove an attendee/person chip from the open meeting or document
     const c = S.containers[S.ui.current]; if (!c) return;
@@ -2111,8 +2136,10 @@ content.addEventListener('change', e => {
   b.done = e.target.checked; b.doneAt = b.done ? new Date().toISOString() : null;
   save(); renderSidebar(); renderMain();
 });
+let lastTxId = null; // the bullet last edited: 📎 Attach adds after it
 content.addEventListener('focusin', e => {
   const t = e.target; if (!t.classList || !t.classList.contains('tx')) return;
+  lastTxId = t.closest('.node').dataset.id;
   if (bsel.size) clearSel();
   if (t.querySelector('a')) { t.textContent = bulletOf(t).text; setCaret(t, 'end'); }
 });
@@ -2141,7 +2168,7 @@ content.addEventListener('input', e => {
     const lines = rebase(normalizeLevels(plainToLines(shown)));
     if (lines.length > 1) {
       b.text = lines[0].text;
-      const rest = rebase(lines.slice(1).map(l => ({ text: l.text, level: l.level })));
+      const rest = rebase(lines.slice(1));
       const before = new Set(Object.keys(S.bullets));
       const last = insertLines(rest, { cid: b.containerId, parent: b.parentId, after: b, reuse: null, atEnd: false });
       shareRootLinks(t, b, before);
@@ -2341,7 +2368,7 @@ content.addEventListener('keydown', e => {
     b.text = text.slice(0, pos);
     const after = text.slice(pos);
     const kids = childList(b.id, cid);
-    const nb = (kids.length && !b.collapsed && !t.closest('.node').dataset.flat)
+    const nb = (kids.length && !b.collapsed)
       ? newBullet(cid, b.id, orderFirst(b.id, cid), { text: after })
       : newBullet(cid, b.parentId, orderAfter(b), { text: after });
     inheritLinks(nb);
@@ -2442,7 +2469,7 @@ function placePop(x, y) {
 }
 function sessionPop(s, x, y) {
   popFor = s;
-  const n = Object.values(S.bullets).filter(k => k.parentId === s.id).length;
+  const n = kidsOf(s.id).length;
   pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">Session</div>' +
     '<label>Date <input type="date" id="sDate" value="' + s.date + '"></label>' +
     '<div style="color:var(--muted);font-size:12px">Moving to a date that already has a session merges the two.</div>' +
@@ -2459,18 +2486,14 @@ function sessionPop(s, x, y) {
     save(); renderMain(); closePop();
   };
   $('#sDel').onclick = () => {
-    if (n && !confirm('Delete the ' + fmtLong(s.date) + ' session and everything under it?\n(Ctrl+Z undoes this.)')) return;
+    if (n && !confirm('Delete the ' + fmtLong(s.date) + ' session and everything under it?' + UNDO_HINT)) return;
     snap(); deleteTree(s.id); popFor = null; save(); renderMain(); closePop();
   };
   $('#sDone').onclick = closePop;
 }
-content.addEventListener('click', e => {
-  if (!e.target.classList.contains('sdate')) return;
-  sessionPop(bulletOf(e.target), e.clientX, e.clientY);
-});
 function folderOptions(exclude) {
   return ['person', 'project'].map(k => '<optgroup label="' + KIND_LABEL[k] + '">' +
-    flatFolders(k).filter(([f]) => !exclude.has(f.id)).map(([f, d]) => '<option value="' + f.id + '">' + '  '.repeat(d) + esc(f.name || 'Untitled') + '</option>').join('') + '</optgroup>').join('');
+    flatFolders(k).filter(([f]) => !exclude.has(f.id)).map(([f, d]) => '<option value="' + f.id + '">' + '  '.repeat(d) + esc(f.id === 'me' ? 'Me (' + TODO_LABEL + ')' : f.name || 'Untitled') + '</option>').join('') + '</optgroup>').join('');
 }
 function moveOptions(excludeId) {
   const cs = Object.values(S.containers).filter(c => (c.type === 'meeting' || c.type === 'document') && c.id !== excludeId)
@@ -2541,10 +2564,12 @@ content.addEventListener('contextmenu', e => {
 function bulletPop(b, x, y) {
   popFor = b;
   const sub = countTree(b.id) - 1;
+  const undated = !b.start && !b.end; // no dates yet: Start offers today (kept by Done or by setting an End)
   pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">Dates</div>' +
-    '<label>Start <input type="date" id="pStart" value="' + (b.start || '') + '"></label>' +
+    '<label>Start <input type="date" id="pStart" value="' + (b.start || (undated ? todayISO() : '')) + '"></label>' +
     '<label>End <input type="date" id="pEnd" value="' + (b.end || '') + '"></label>' +
-    '<div style="color:var(--muted);font-size:12px">Session date: ' + (effDate(b) ? fmtLong(effDate(b)) : 'none') + '</div>' +
+    (undated ? '<div class="note">Start is today until you change it: Done keeps it, Clear dates or clicking away drops it.</div>' : '') +
+    '<div class="note">Session date: ' + (effDate(b) ? fmtLong(effDate(b)) : 'none') + '</div>' +
     '<div style="font-weight:600;margin:10px 0 4px">Links and place</div>' +
     '<label>Link to <select id="pLink"><option value="">choose…</option>' + folderOptions(new Set(liveLinks(b).map(l => l.folder))) + '</select></label>' +
     '<label>Move to <select id="pMove"><option value="">choose…</option>' + moveOptions(b.containerId) + '</select></label>' +
@@ -2563,7 +2588,7 @@ function bulletPop(b, x, y) {
   $('#pMove').onchange = () => { const v = $('#pMove').value; if (!v) return; popFor = null; closePop(); moveToContainer([b.id], v); };
   $('#pDel').onclick = () => { popFor = null; closePop(); deleteItems([b.id]); };
   $('#pClear').onclick = () => { $('#pStart').value = ''; $('#pEnd').value = ''; apply(); closePop(); };
-  $('#pDone').onclick = closePop;
+  $('#pDone').onclick = () => { if (undated && !snapped && $('#pStart').value) apply(); closePop(); };
 }
 function conflictsPop() {
   popFor = null;
@@ -2632,6 +2657,7 @@ document.addEventListener('dragstart', e => {
   } else drag = null;
 });
 document.addEventListener('dragend', () => { drag = null; dropAt = null; clearDropMarks(); });
+const dragsNotes = () => drag && drag.type === 'bullet' && !drag.ids.some(id => S.bullets[id] && S.bullets[id].isSession); // sessions only link to people/projects
 function canDropOnFolder(fid) {
   if (!drag) return false;
   if (drag.type === 'folder') { const a = S.folders[drag.id], b = S.folders[fid]; return a && b && a.kind === b.kind && !folderDesc(drag.id).has(fid); }
@@ -2641,17 +2667,19 @@ const lists = $('#lists');
 lists.addEventListener('dragover', e => {
   if (!drag) return;
   clearDropMarks();
-  const fi = e.target.closest('.item.folder'), hdr = e.target.closest('.fsec'), ci = e.target.closest('.item[data-cid]');
-  if (fi && canDropOnFolder(fi.dataset.fid)) { e.preventDefault(); e.dataTransfer.dropEffect = drag.type === 'folder' ? 'move' : 'link'; fi.classList.add('drop'); }
-  else if (ci && drag.type === 'bullet' && !drag.ids.some(id => S.bullets[id] && S.bullets[id].isSession)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; ci.classList.add('drop'); }
+  const fi = e.target.closest('.item.folder'), hdr = e.target.closest('.fsec'), ci = e.target.closest('.item[data-cid]'), td = e.target.closest('.item[data-view="today"]');
+  if (td && dragsNotes()) { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; td.classList.add('drop'); }
+  else if (fi && canDropOnFolder(fi.dataset.fid)) { e.preventDefault(); e.dataTransfer.dropEffect = drag.type === 'folder' ? 'move' : 'link'; fi.classList.add('drop'); }
+  else if (ci && dragsNotes()) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; ci.classList.add('drop'); }
   else if (hdr && drag.type === 'folder' && S.folders[drag.id] && S.folders[drag.id].kind === hdr.dataset.kind) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; hdr.classList.add('drop'); }
 });
 lists.addEventListener('dragleave', e => { if (!lists.contains(e.relatedTarget)) clearDropMarks(); });
 lists.addEventListener('drop', e => {
   if (!drag) return;
   e.preventDefault(); clearDropMarks();
-  const fi = e.target.closest('.item.folder'), hdr = e.target.closest('.fsec'), ci = e.target.closest('.item[data-cid]');
+  const fi = e.target.closest('.item.folder'), hdr = e.target.closest('.fsec'), ci = e.target.closest('.item[data-cid]'), td = e.target.closest('.item[data-view="today"]');
   const f = focusInfo();
+  if (td && dragsNotes()) { const ids = drag.ids; drag = null; addToTodo(ids); refocus(f); return; }
   if (fi && canDropOnFolder(fi.dataset.fid)) {
     const fid = fi.dataset.fid;
     if (drag.type === 'bullet') { const ids = drag.ids; drag = null; linkItems(ids, fid); refocus(f); return; }
@@ -2659,7 +2687,7 @@ lists.addEventListener('drop', e => {
     if (drag.type === 'container') { const c = S.containers[drag.id]; snap(); if (!addLink(c, fid)) setStatus(folderName(fid) + ' is already linked'); }
     else if (drag.type === 'folder') { snap(); S.folders[drag.id].parentId = fid; S.folders[fid].collapsed = false; }
     save(); renderAll(); refocus(f); flashFolder(fid);
-  } else if (ci && drag.type === 'bullet' && !drag.ids.some(id => S.bullets[id] && S.bullets[id].isSession)) { const ids = drag.ids; drag = null; moveToContainer(ids, ci.dataset.cid); return; }
+  } else if (ci && dragsNotes()) { const ids = drag.ids; drag = null; moveToContainer(ids, ci.dataset.cid); return; }
   else if (hdr && drag.type === 'folder') { snap(); S.folders[drag.id].parentId = null; save(); renderAll(); refocus(f); }
   drag = null;
 });
@@ -2718,10 +2746,7 @@ content.addEventListener('drop', e => {
   const t = row ? bulletOf(row) : node ? bulletOf(node) : null;
   attachFiles(e.dataTransfer.files, attachTarget(t));
 });
-let lastTxId = null;
-content.addEventListener('focusin', e => { if (e.target.classList && e.target.classList.contains('tx')) lastTxId = e.target.closest('.node').dataset.id; });
 $('#attachFile').onchange = () => { const f = $('#attachFile'); const t = lastTxId && S.bullets[lastTxId]; attachFiles(f.files, attachTarget(t && t.containerId === S.ui.current ? t : null)); };
-content.addEventListener('click', e => { const a = e.target.closest && e.target.closest('.att'); if (a && !a.classList.contains('missing')) openAtt(a); });
 
 /* Today: drag by the ⠿ handle (mouse: drag; touch: hold ~0.2 s, then drag). Pointer events, so it works on the phone. */
 let rkd = null;
@@ -2828,8 +2853,6 @@ narrowMQ.addEventListener && narrowMQ.addEventListener('change', () => { documen
 syncNavBtn();
 $('#reloadBtn').textContent = '↻ Refresh (' + (isMac ? '⌘R' : 'Ctrl+R') + ')';
 $('#reloadBtn').onclick = () => { try { persist(); stamp(); } catch (e) {} location.reload(); };
-$('#newMeeting').onclick = () => createContainer('meeting');
-$('#newDoc').onclick = () => createContainer('document');
 $('#filter').addEventListener('input', renderSidebar);
 $('#toastUndo').onclick = () => { hideToast(); undo(); };
 
@@ -2840,7 +2863,7 @@ function exportData() {
   a.download = 'pim-backup-' + todayISO() + '.json';
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-  S.ui.lastExport = new Date().toISOString(); save(); renderBanner();
+  S.ui.lastExport = new Date().toISOString(); save(); showBackupDue();
 }
 $('#exportBtn').onclick = exportData;
 $('#usage').onclick = () => alert(usageText());
@@ -2853,7 +2876,7 @@ $('#importFile').onchange = e => {
       const o = JSON.parse(r.result);
       if (!o || typeof o.containers !== 'object' || typeof o.bullets !== 'object') throw new Error('Not a backup file');
       const n = Object.values(o.containers).filter(c => c.type !== 'inbox').length, m = Object.keys(o.bullets).length, k = o.folders ? Object.keys(o.folders).length : 0;
-      if (!confirm('Replace everything with this backup (' + n + ' meetings/files, ' + m + ' bullets, ' + k + ' people/projects)?' + (SY.connected ? '\nThis also replaces your notes in Drive and on your other laptops.' : '') + '\n(Ctrl+Z undoes this.)')) return;
+      if (!confirm('Replace everything with this backup (' + n + ' meetings/files, ' + m + ' bullets, ' + k + ' people/projects)?' + (SY.connected ? '\nThis also replaces your notes in Drive and on your other laptops.' : '') + UNDO_HINT)) return;
       snap(); S.containers = fullColl('containers', o.containers); S.bullets = fullColl('bullets', o.bullets); S.folders = fullColl('folders', o.folders || {}); ensureModel(); S.ui.current = null; S.ui.folder = null; save(); renderAll();
     } catch (err) { alert('Could not import: ' + err.message); }
     e.target.value = '';
@@ -2870,7 +2893,7 @@ $('#importFile').onchange = e => {
 })();
 try { if (!sessionStorage.getItem('eccopim.tab')) { sessionStorage.setItem('eccopim.tab', '1'); S.ui.current = null; S.ui.folder = null; S.ui.view = 'today'; S.ui.day = null; } } catch (e) {}
 if (S.ui.current && S.containers[S.ui.current]) openContainer(S.ui.current);
-else { S.ui.current = null; if (S.ui.folder && !S.folders[S.ui.folder]) S.ui.folder = null; renderAll(); }
+else { S.ui.current = null; if (S.ui.folder === 'me' || (S.ui.folder && !S.folders[S.ui.folder])) S.ui.folder = null; renderAll(); } // Me's own view is now Glenn To-Do
 $('#syncBtn').onclick = () => { if (syncState === 'error' && token) syncNow(); else connect(); };
 $('#confBtn').onclick = () => conflictsPop();
 window.addEventListener('online', () => syncNow());
