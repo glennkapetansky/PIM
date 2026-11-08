@@ -162,6 +162,7 @@ body.sweeping,body.sweeping *{-webkit-user-select:none!important;user-select:non
 .tw{width:14px;flex:0 0 14px;text-align:center;color:var(--faint);font-size:11px;line-height:22px;user-select:none}
 .tw.has{cursor:pointer;color:var(--text);box-sizing:border-box;width:13px;flex:0 0 13px;height:13px;margin:4.5px 1px 0 0;display:flex;align-items:center;justify-content:center;border:1.5px solid var(--muted);border-radius:3px;font-size:12px;font-weight:800;line-height:1;background:var(--bg)}
 .tw.has:hover{border-color:var(--text)}
+.kidn{cursor:pointer}.kidn:hover{color:var(--text);text-decoration:underline}
 .ck{margin:5px 2px 0 0;opacity:0;cursor:pointer;flex:0 0 auto}
 input[type="checkbox"]{accent-color:var(--accent)}
 .row:hover .ck,.ck.show,.ck:focus{opacity:1}
@@ -1329,16 +1330,17 @@ function metaHTML(b, kidCount) {
   return parts.join('');
 }
 
-function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted (Today lists each dated item once)
-  const allKids = idx.get(b.id) || [], kids = flat ? [] : allKids;
+const flatOpen = new Set(); // flat rows (Glenn To-Do, other days, Future/Done) whose sub-bullets are shown (per session; the note's own collapsed state is untouched)
+function nodeEl(b, idx, flat) { // flat: one row per item (each item shows once); its sub-bullets stay folded behind + until opened
+  const allKids = idx.get(b.id) || [], shown = flat ? flatOpen.has(b.id) : !b.collapsed, kids = flat && !shown ? [] : allKids;
   const n = el('div', 'node'); n.dataset.id = b.id; if (flat) n.dataset.flat = '1';
   const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : '') + (bsel.has(b.id) ? ' sel' : '')); // gathered lists mark overdue rows red (vItems, rankItem)
   const tw = el('span', 'tw');
-  if (kids.length) { tw.textContent = b.collapsed ? '+' : '−'; tw.classList.add('has'); tw.title = (b.collapsed ? 'Click: show sub-bullets' : 'Click: hide sub-bullets') + ' (' + MOD + '+.)'; }
+  if (allKids.length && (flat || kids.length)) { tw.textContent = shown ? '−' : '+'; tw.classList.add('has'); tw.title = (shown ? 'Click: hide sub-bullets' : 'Click: show sub-bullets') + ' (' + MOD + '+.)'; }
   else tw.textContent = b.isSession ? '' : '•';
   if (!b.isSession) { tw.draggable = true; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag: onto a person or project to link, onto a meeting or file to move, or within the notes to reorder'; }
   else { tw.draggable = true; tw.textContent = tw.textContent || '•'; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag onto a person or project to link this whole session'; }
-  if (kids.length) { const dg = el('span', 'dg'); dg.textContent = '⠿'; dg.draggable = true; dg.title = b.isSession ? 'Drag onto a person or project to link this whole session' : 'Drag: onto a person or project to link, onto a meeting or file to move, or within the notes to reorder'; row.appendChild(dg); }
+  if (kids.length && !flat) { const dg = el('span', 'dg'); dg.textContent = '⠿'; dg.draggable = true; dg.title = b.isSession ? 'Drag onto a person or project to link this whole session' : 'Drag: onto a person or project to link, onto a meeting or file to move, or within the notes to reorder'; row.appendChild(dg); }
   row.appendChild(tw);
   if (b.isSession) {
     const d = el('span', 'sdate'); d.textContent = fmtLong(b.date); d.title = 'Click to change the date or delete this session'; row.appendChild(d);
@@ -1350,10 +1352,10 @@ function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted 
   tx.dataset.ph = b.isSession ? 'Session topic (optional)' : '';
   tx.innerHTML = linkify(b.text);
   row.appendChild(tx);
-  const meta = el('span', 'meta'); meta.innerHTML = metaHTML(b, kids.length) + (flat && allKids.length ? '<span title="Sub-bullets; open the note to see them">(+' + allKids.length + ')</span>' : ''); row.appendChild(meta);
+  const meta = el('span', 'meta'); meta.innerHTML = (flat ? metaHTML(b, 0) + (allKids.length && !shown ? '<span class="kidn" title="Click to show the sub-bullets">(+' + allKids.length + ')</span>' : '') : metaHTML(b, kids.length)); row.appendChild(meta);
   n.appendChild(row);
   if (b.file) { tx.dataset.ph = 'Caption'; n.appendChild(attEl(b)); }
-  if (kids.length && !b.collapsed) { const k = el('div', 'kids'); for (const c of kids) k.appendChild(nodeEl(c, idx)); n.appendChild(k); }
+  if (kids.length && shown) { const k = el('div', 'kids'); for (const c of kids) k.appendChild(nodeEl(c, idx)); n.appendChild(k); }
   return n;
 }
 
@@ -2154,8 +2156,9 @@ content.addEventListener('click', e => {
   if (tg) { openFolder(tg.dataset.f); return; }
   const a = e.target.closest('.tx a');
   if (a && document.activeElement !== a.closest('.tx')) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); return; }
-  if (e.target.classList.contains('tw') && e.target.classList.contains('has')) {
-    const f = focusAtMouseDown; const b = bulletOf(e.target);
+  if ((e.target.classList.contains('tw') && e.target.classList.contains('has')) || e.target.classList.contains('kidn')) {
+    const f = e.target.classList.contains('tw') ? focusAtMouseDown : null; const b = bulletOf(e.target);
+    if (e.target.closest('.node').dataset.flat) { flatOpen.has(b.id) ? flatOpen.delete(b.id) : flatOpen.add(b.id); renderMain(); refocus(f); return; }
     b.collapsed = !b.collapsed; save(); renderMain(); refocus(f);
   }
 });
@@ -2468,6 +2471,7 @@ content.addEventListener('keydown', e => {
   }
   if (mod && e.key === '.') {
     e.preventDefault();
+    if (t.closest('.node').dataset.flat) { if (childList(b.id, cid).length) { flatOpen.has(b.id) ? flatOpen.delete(b.id) : flatOpen.add(b.id); renderMain(); refocus({ id: b.id, pos: getCaret(t) }); } return; }
     if (childList(b.id, cid).length) { b.collapsed = !b.collapsed; commit(b.id, getCaret(t)); }
     return;
   }
