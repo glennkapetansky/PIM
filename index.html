@@ -1318,7 +1318,8 @@ function sortedLinks(t) {
 }
 function metaHTML(b, kidCount) {
   const parts = [];
-  for (const l of sortedLinks(b)) if (l.folder !== S.ui.folder) parts.push(tagHTML(l));
+  const own = curView() === 'today' ? 'me' : S.ui.folder; // a folder's own tag is left off its view; Glenn To-Do is Me's
+  for (const l of sortedLinks(b)) if (l.folder !== own) parts.push(tagHTML(l));
   if (b.start || b.end) {
     const late = isLate(b);
     parts.push('<span class="pill' + (late ? ' late' : '') + '" title="' + (late ? 'Overdue · ' : '') + 'Right-click to change dates">' + dateText(b) + '</span>');
@@ -1331,7 +1332,7 @@ function metaHTML(b, kidCount) {
 function nodeEl(b, idx, flat) { // flat: this row only, its sub-bullets counted (Today lists each dated item once)
   const allKids = idx.get(b.id) || [], kids = flat ? [] : allKids;
   const n = el('div', 'node'); n.dataset.id = b.id; if (flat) n.dataset.flat = '1';
-  const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : '') + (flat && isLate(b) ? ' late' : '') + (bsel.has(b.id) ? ' sel' : '')); // flat = day view: overdue rows red
+  const row = el('div', 'row' + (b.isSession ? ' session' : '') + (b.done ? ' done' : '') + (bsel.has(b.id) ? ' sel' : '')); // gathered lists mark overdue rows red (vItems, rankItem)
   const tw = el('span', 'tw');
   if (kids.length) { tw.textContent = b.collapsed ? '+' : '−'; tw.classList.add('has'); tw.title = (b.collapsed ? 'Click: show sub-bullets' : 'Click: hide sub-bullets') + ' (' + MOD + '+.)'; }
   else tw.textContent = b.isSession ? '' : '•';
@@ -1586,6 +1587,7 @@ function vItems(ct, list, dim, flat) {
       s.title = 'Open where this was written'; s.onclick = () => goToSource(r.b); g.appendChild(s); lastSrc = lab;
     }
     const n = nodeEl(r.b, idxOf(r.b.containerId), flat); n.dataset.root = '1'; g.appendChild(n);
+    if (isLate(r.b)) n.querySelector('.row').classList.add('late'); // overdue: red, in every gathered list (folders too); order is unchanged
   }
   ct.appendChild(g);
   return g;
@@ -1615,10 +1617,10 @@ function goView(view, opts) {
   save(); renderAll(); $('#main').scrollTop = 0;
 }
 const curView = () => (S.ui.current || S.ui.folder) ? null : (['timeline', 'search'].includes(S.ui.view) ? S.ui.view : 'today'); // anything else (incl. the removed Calendar) = Today
-function todayCount() { // overdue + active today, for the sidebar badge
+function todayCount() { // to-dos overdue + active today, for the sidebar badge
   const t = todayISO(); let n = 0, late = 0;
-  for (const b of Object.values(S.bullets)) {
-    if (b.isSession || b.done || (!b.start && !b.end) || !S.containers[b.containerId] || !(b.text || '').trim()) continue;
+  for (const b of todoItems()) {
+    if (b.done || (!b.start && !b.end)) continue;
     if (isLate(b)) { n++; late++; } else if (onDay(b, t)) n++;
   }
   return { n, late };
@@ -1681,8 +1683,11 @@ function renderDay(ct) {
     for (const x of log) logRow(box, x, d);
     ct.appendChild(box);
   }
-  const done = (all.filter(b => b.done && b.doneAt && dayOf(b.doneAt) === d).map(b => ({ b }))).sort((a, b) => b.b.doneAt.localeCompare(a.b.doneAt));
-  if (done.length && vHeader(ct, k + 'done', 'Completed', done.length, true, !isToday)) vItems(ct, done, false, true);
+  if (isToday) renderLater(ct, d);
+  else {
+    const done = (all.filter(b => b.done && b.doneAt && dayOf(b.doneAt) === d).map(b => ({ b }))).sort((a, b) => b.b.doneAt.localeCompare(a.b.doneAt));
+    if (done.length && vHeader(ct, k + 'done', 'Completed', done.length, true, true)) vItems(ct, done, false, true);
+  }
   if (!Object.values(S.containers).some(c => c.type !== 'inbox')) ct.appendChild(welcome());
 }
 
@@ -1691,10 +1696,12 @@ function renderDay(ct) {
    b.rank (synced with the bullet) orders "My order"; pool items with no rank wait in "To rank".
    An item leaves the order when it's checked off or leaves the pool (date moved past 7 days, Me link removed);
    its rank is cleared then, so it comes back through To rank. */
-function todayPool(d) {
+/* Glenn To-Do holds only what Glenn put there: items linked to Me as a task (dropped on it, typed into it, or
+   linked by right-click). Items in other people's and projects' folders stay there, whatever their dates. */
+const todoItems = () => folderMembers('me').filter(x => !isNote(x) && ((x.b.text || '').trim() || x.b.file)).map(x => x.b);
+function todayPool(d) { // To rank + My order: undated to-dos, and dated ones overdue, active, or starting within 7 days
   const end7 = addDays(d, 7), pool = new Map();
-  for (const b of liveItems()) if (!b.done && (b.start || b.end) && (isLate(b) || onDay(b, d) || (spanOf(b).s > d && spanOf(b).s <= end7))) pool.set(b.id, b);
-  for (const x of folderMembers('me')) { const b = x.b; if (!b.done && !b.start && !b.end && !isNote(x) && (b.text || '').trim()) pool.set(b.id, b); }
+  for (const b of todoItems()) if (!b.done && (!(b.start || b.end) || isLate(b) || onDay(b, d) || (spanOf(b).s > d && spanOf(b).s <= end7))) pool.set(b.id, b);
   return pool;
 }
 function pruneRanks(pool) { // quietly (no undo step): ranks of items that left the pool
@@ -1720,13 +1727,32 @@ function renderRanked(ct, d) {
   if (h1) zone('torank', fresh, 'Nothing new to rank. Drag an item here to take it out of your order.');
   vHeader(ct, 'day:mine', 'My order', ranked.length, false);
   ct.lastChild.dataset.zone = 'ranked';
-  zone('ranked', ranked, fresh.length ? 'Drag items here from To rank by their ⠿ handle, in the order you want to do them.' : 'Nothing on your plate today. Items show up in To rank when they are overdue, active today or start within 7 days, and when you add them above or drop them on ' + TODO_LABEL + ' in the sidebar.');
+  zone('ranked', ranked, fresh.length ? 'Drag items here from To rank by their ⠿ handle, in the order you want to do them.' : 'Nothing on your plate today. Add a to-do above, or drop a bullet on ' + TODO_LABEL + ' in the sidebar. Dated ones wait under Future until 7 days before their date.');
+}
+/* Below My order on Glenn To-Do, both collapsed: Future = to-dos dated more than 7 days out (soonest first;
+   each moves up to To rank 7 days before its date), Done = checked to-dos, newest first. */
+let doneAll = false;
+const DONE_LIM = 100;
+function renderLater(ct, d) {
+  const end7 = addDays(d, 7), all = todoItems();
+  const future = all.filter(b => !b.done && (b.start || b.end) && spanOf(b).s > end7)
+    .sort((a, b) => spanOf(a).s.localeCompare(spanOf(b).s) || (a.created || '').localeCompare(b.created || '')).map(b => ({ b }));
+  if (vHeader(ct, 'day:future', 'Future', future.length, true, false)) {
+    if (future.length) vItems(ct, future, false, true); else vEmpty(ct, 'Nothing dated more than 7 days out.');
+  }
+  const done = all.filter(b => b.done)
+    .sort((a, b) => (b.doneAt || '').localeCompare(a.doneAt || '')).map(b => ({ b }));
+  if (vHeader(ct, 'day:done', 'Done', done.length, true, false)) {
+    if (!done.length) { vEmpty(ct, 'Nothing checked off yet.'); return; }
+    vItems(ct, doneAll ? done : done.slice(0, DONE_LIM), false, true);
+    if (!doneAll && done.length > DONE_LIM) { const m = navBtn('Show all ' + done.length, 'Show every checked item', () => { doneAll = true; renderMain(); }); m.style.marginTop = '10px'; ct.appendChild(m); }
+  }
 }
 function rankItem(b, idxOf) { // no buttons: placing and reordering is by dragging the ⠿ handle
   const w = el('div', 'rkit'); w.dataset.id = b.id;
   const s = el('div', 'src'); s.textContent = srcLabel(b); s.title = 'Open where this was written'; s.onclick = () => goToSource(b); w.appendChild(s);
   const n = nodeEl(b, idxOf(b.containerId), true); n.dataset.root = '1'; w.appendChild(n);
-  const row = n.querySelector('.row');
+  const row = n.querySelector('.row'); if (isLate(b)) row.classList.add('late');
   const h = el('span', 'rk'); h.textContent = '⠿'; h.title = 'Drag to set its place (on a phone: hold, then drag)'; row.insertBefore(h, row.firstChild);
   return w;
 }
@@ -2043,8 +2069,11 @@ function addToTodo(ids) {
   if (!n) { undoStack.pop(); toast('Already on your To-Do', false); return; }
   save(); renderAll();
   const it = document.querySelector('.item[data-view="today"]'); if (it) it.classList.add('flash');
-  const pool = todayPool(todayISO()), later = ids.filter(id => !pool.has(id)).length;
-  toast('Added ' + plural(ids.length, 'item') + ' to ' + TODO_LABEL + (later ? '; ' + later + (later === 1 ? ' is' : ' are') + ' checked or dated over a week out, so ' + (later === 1 ? 'it shows' : 'they show') + ' later' : ''));
+  const pool = todayPool(todayISO()), bs = ids.map(id => S.bullets[id]);
+  const fut = bs.filter(b => !b.done && !pool.has(b.id)), dn = bs.filter(b => b.done).length;
+  const where = fut.length === bs.length ? (bs.length === 1 ? ', under Future until ' + fmt(addDays(spanOf(bs[0]).s, -7)) + ', then To rank' : ', under Future')
+    : dn === bs.length ? ', under Done' : (fut.length ? '; ' + fut.length + ' under Future' : '') + (dn ? '; ' + dn + ' under Done' : '');
+  toast('Added ' + plural(ids.length, 'item') + ' to ' + TODO_LABEL + where);
 }
 function setDoneItems(ids, val) {
   snap(); const now = new Date().toISOString();
@@ -2565,6 +2594,7 @@ function bulletPop(b, x, y) {
   popFor = b;
   const sub = countTree(b.id) - 1;
   const undated = !b.start && !b.end; // no dates yet: Start offers today (kept by Done or by setting an End)
+  const onTodo = curView() === 'today' && liveLinks(b).some(l => l.folder === 'me');
   pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">Dates</div>' +
     '<label>Start <input type="date" id="pStart" value="' + (b.start || (undated ? todayISO() : '')) + '"></label>' +
     '<label>End <input type="date" id="pEnd" value="' + (b.end || '') + '"></label>' +
@@ -2573,6 +2603,7 @@ function bulletPop(b, x, y) {
     '<div style="font-weight:600;margin:10px 0 4px">Links and place</div>' +
     '<label>Link to <select id="pLink"><option value="">choose…</option>' + folderOptions(new Set(liveLinks(b).map(l => l.folder))) + '</select></label>' +
     '<label>Move to <select id="pMove"><option value="">choose…</option>' + moveOptions(b.containerId) + '</select></label>' +
+    (onTodo ? '<div class="btns" style="margin-top:6px"><button id="pOffTodo" title="Remove the Me link">Remove from ' + TODO_LABEL + '</button></div>' : '') +
     '<div class="btns"><button id="pDel" class="danger">Delete' + (sub ? ' (+' + plural(sub, 'sub-bullet') + ')' : '') + '</button>' +
     '<span style="flex:1"></span><button id="pClear">Clear dates</button><button id="pDone" class="primary">Done</button></div>';
   placePop(x, y);
@@ -2581,12 +2612,18 @@ function bulletPop(b, x, y) {
     if (!snapped) { snap(); snapped = true; }
     let s = $('#pStart').value || null, en = $('#pEnd').value || null;
     if (s && en && en < s) { en = s; $('#pEnd').value = s; }
+    const was = curView() === 'today' && todayPool(todayISO()).has(b.id);
     b.start = s; b.end = en; save(); renderMain();
+    if (was && !b.done && !todayPool(todayISO()).has(b.id)) toast('Moved to Future: it comes back to To rank on ' + fmt(addDays(spanOf(b).s, -7)));
   };
   $('#pStart').onchange = apply; $('#pEnd').onchange = apply;
   $('#pLink').onchange = () => { const v = $('#pLink').value; if (!v) return; snap(); addLink(b, v); save(); closePop(); renderAll(); };
   $('#pMove').onchange = () => { const v = $('#pMove').value; if (!v) return; popFor = null; closePop(); moveToContainer([b.id], v); };
   $('#pDel').onclick = () => { popFor = null; closePop(); deleteItems([b.id]); };
+  if (onTodo) $('#pOffTodo').onclick = () => {
+    snap(); removeLink(b, 'me'); save(); closePop(); renderAll();
+    toast('Removed from ' + TODO_LABEL);
+  };
   $('#pClear').onclick = () => { $('#pStart').value = ''; $('#pEnd').value = ''; apply(); closePop(); };
   $('#pDone').onclick = () => { if (undated && !snapped && $('#pStart').value) apply(); closePop(); };
 }
@@ -2890,6 +2927,13 @@ $('#importFile').onchange = e => {
     if (c.type !== 'meeting') continue;
     for (const s of sessionsOf(c.id)) if (!(c.id === S.ui.current && s.date === todayISO()) && treeEmpty(s.id)) deleteTree(s.id);
   }
+})();
+(function keepRankedOnTodo() { // Nov 8: Glenn To-Do became "only what I put there". Anything already in My order stays: it gets a Me link.
+  let n = 0;
+  for (const b of Object.values(S.bullets)) if (b.rank != null && !b.done && !(b.links || []).some(l => l.folder === 'me' && !l.note)) {
+    const l = (b.links || []).find(x => x.folder === 'me'); if (l) delete l.note; else addLink(b, 'me'); n++;
+  }
+  if (n) save();
 })();
 try { if (!sessionStorage.getItem('eccopim.tab')) { sessionStorage.setItem('eccopim.tab', '1'); S.ui.current = null; S.ui.folder = null; S.ui.view = 'today'; S.ui.day = null; } } catch (e) {}
 if (S.ui.current && S.containers[S.ui.current]) openContainer(S.ui.current);
