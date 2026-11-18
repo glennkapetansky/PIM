@@ -320,8 +320,86 @@ body.navHidden #content{padding-left:56px}
 <div id="toast"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
 
 <script>
-(function(){
+(async function(){
 'use strict';
+
+/* ---------- notes storage (stage 11): IndexedDB ----------
+   The notes (eccopim.v1) and the sync bookkeeping that grows with them (eccopim.meta, .sync, .conflicts) live in
+   the browser database "hinay-notes", which can hold gigabytes. localStorage (about 5 million characters per site)
+   keeps only small settings. Everything is read into memory once, here, before the rest of the app runs; writes
+   go to the database right away. Rule: a copy of one of these keys still in localStorage is always the newest one.
+   A write that reaches the database removes it; if the database refuses a write, it falls back to localStorage.
+   So the first start after the upgrade moves the notes over by itself, and nothing is lost if the database fails. */
+const BIG = ['eccopim.v1', 'eccopim.meta', 'eccopim.sync', 'eccopim.conflicts'];
+const big = new Map(), bigDirty = new Set(), bigSaved = new Map(), bigInflight = new Map(); // in memory / to write / on disk / being written
+let bigDB = null, bigBusy = null, bigErr = null;
+function bigOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('hinay-notes', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('database blocked'));
+  });
+}
+async function bigLoad() {
+  try {
+    bigDB = await bigOpen();
+    await new Promise((res, rej) => {
+      const tx = bigDB.transaction('kv', 'readonly'), st = tx.objectStore('kv');
+      for (const k of BIG) { const r = st.get(k); r.onsuccess = () => { if (typeof r.result === 'string') { big.set(k, r.result); bigSaved.set(k, r.result); } }; }
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+    });
+  } catch (e) { bigDB = null; big.clear(); console.warn('Hinay: browser database unavailable; notes stay in localStorage', e); return; }
+  for (const k of BIG) { let v = null; try { v = localStorage.getItem(k); } catch (e) {} if (v !== null) { big.set(k, v); bigDirty.add(k); } } // left in localStorage = newer
+  if (bigDirty.size) await bigFlush();
+}
+function bigGet(k) { if (bigDB) return big.has(k) ? big.get(k) : null; try { return localStorage.getItem(k); } catch (e) { return null; } }
+function bigSet(k, str) { // without the database: localStorage, which throws when full (as before stage 11)
+  if (!bigDB) { localStorage.setItem(k, str); return; }
+  big.set(k, str);
+  if (!bigDirty.has(k) && str === (bigInflight.has(k) ? bigInflight.get(k) : bigSaved.get(k))) return; // unchanged
+  bigDirty.add(k); bigFlush();
+}
+function lsCopy(keys) { // all or nothing, so notes and their sync bookkeeping never come back from different moments
+  const done = [];
+  for (const k of keys) { try { localStorage.setItem(k, big.get(k)); done.push(k); } catch (e) { for (const d of done) try { localStorage.removeItem(d); } catch (x) {} return false; } }
+  return true;
+}
+function bigEmergencyCopy() { // the page is closing or going to the background: a database write may not finish in time,
+  if (!bigDB) return;          // so also leave a quick copy in localStorage (newest by the rule above; removed once the database has it)
+  const keys = BIG.filter(k => big.has(k) && big.get(k) !== bigSaved.get(k));
+  if (keys.length) lsCopy(keys);
+}
+function bigFlush() { // one transaction for everything changed; resolves true when it is on disk somewhere
+  if (!bigDB) return Promise.resolve(true);
+  if (bigBusy) return bigBusy.then(() => bigFlush());
+  if (!bigDirty.size) return Promise.resolve(true);
+  const keys = [...bigDirty]; bigDirty.clear();
+  for (const k of keys) bigInflight.set(k, big.get(k));
+  bigBusy = new Promise(res => {
+    let tx;
+    try { tx = bigDB.transaction('kv', 'readwrite'); const st = tx.objectStore('kv'); for (const k of keys) st.put(bigInflight.get(k), k); }
+    catch (e) { res(e); return; }
+    tx.oncomplete = () => res(null); tx.onerror = () => res(tx.error || new Error('write failed')); tx.onabort = () => res(tx.error || new Error('write aborted'));
+  }).then(err => {
+    bigBusy = null;
+    if (!err) {
+      for (const k of keys) { bigSaved.set(k, bigInflight.get(k)); bigInflight.delete(k); if (!bigDirty.has(k)) try { localStorage.removeItem(k); } catch (e) {} }
+      if (bigErr) { bigErr = null; try { setStatus(''); } catch (e) {} }
+      return true;
+    }
+    for (const k of keys) { bigInflight.delete(k); bigDirty.add(k); } // try again with the next save
+    bigErr = err; // the database refused (disk full?): keep the newest copy in localStorage instead
+    const ok = lsCopy(BIG.filter(k => big.has(k) && big.get(k) !== bigSaved.get(k)));
+    console.warn('Hinay: database write failed', err);
+    try { // (inside try: this can run during startup, before the page's helpers exist)
+      if (ok) setStatus('Saved, but not in the browser database (' + (err.name || 'error') + '). Export a backup.', true);
+      else { setStatus('Save failed. Export a backup now.', true); storageFull(); }
+    } catch (e) {}
+    return ok;
+  });
+  return bigBusy;
+}
+await bigLoad();
 
 /* ---------- utilities ---------- */
 const KEY = 'eccopim.v1';
@@ -368,7 +446,7 @@ const recHash = (coll, v) => hash(stable(slimRec(coll, v))); // same record = sa
 let RAW = null; // the record set as an older version stored it, kept only to carry its sync fingerprints over
 function load() {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = bigGet(KEY);
     if (raw) {
       const o = JSON.parse(raw);
       if (o && o.containers && o.bullets) {
@@ -381,7 +459,7 @@ function load() {
   } catch (e) { /* storage unavailable */ }
   return null;
 }
-function persist() { localStorage.setItem(KEY, JSON.stringify(slimState(S))); }
+function persist() { bigSet(KEY, JSON.stringify(slimState(S))); }
 const LOADED = load();
 let S = LOADED || blank();
 function ensureModel() {
@@ -406,29 +484,46 @@ function save() {
     showSync(); showUsage();
   }, 250);
 }
-window.addEventListener('beforeunload', () => { try { persist(); stamp(); } catch (e) {} });
+function saveNow(leaving) { clearTimeout(saveTimer); try { persist(); stamp(); } catch (e) {} const p = bigFlush(); if (leaving) bigEmergencyCopy(); return p; } // before closing, reloading, or the phone putting the app away
+window.addEventListener('beforeunload', () => { saveNow(true); });
+window.addEventListener('pagehide', () => { saveNow(true); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(true); });
 
-/* storage meter (stage 8): notes live in this browser's local storage, about 5 million characters per site
-   (Chrome on Mac and Android). Pictures and files are elsewhere and don't count. Pulses from 70%. */
+/* storage meter: since stage 11 the notes are in the browser database, which Chrome lets grow to a large share
+   of the free disk (it reports the room as a quota). The meter shows how much of that room Hinay uses, pictures
+   included. Without the database (fallback) it measures localStorage against its ~5 million character limit. */
 const LS_LIMIT = 5242880; // Chrome: 5 MiB of characters per site (measured)
 let fullWarned = false;
-function storageUsed() { let n = 0; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); n += k.length + (localStorage.getItem(k) || '').length; } } catch (e) {} return n; }
-function usageText() {
-  const n = storageUsed(), pct = n / LS_LIMIT * 100;
-  return 'Notes storage in this browser: ' + (n / 1e6).toFixed(2) + ' of 5.24 million characters (' + pct.toFixed(1) + '%).\n\n' +
-    'Pictures and files are kept separately and don\'t count.\n' +
-    (pct >= 70 ? 'Time to move notes to the browser\'s larger storage: ask Claude for that change. Until then, export a backup regularly.'
-      : 'Nothing to do. This turns dark and pulses at 70%, well before it fills.');
+function lsUsed() { let n = 0; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); n += k.length + (localStorage.getItem(k) || '').length; } } catch (e) {} return n; }
+const mb = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + ' MB';
+async function storageInfo() {
+  const notes = BIG.reduce((n, k) => n + (bigGet(k) || '').length, 0);
+  let est = null, persisted = null;
+  try { est = await navigator.storage.estimate(); } catch (e) {}
+  try { persisted = await navigator.storage.persisted(); } catch (e) {}
+  const pct = bigDB ? (est && est.quota ? est.usage / est.quota * 100 : 0) : lsUsed() / LS_LIMIT * 100;
+  return { notes, est, persisted, pct };
 }
-function showUsage() {
+async function usageText() {
+  const i = await storageInfo();
+  if (!bigDB) return 'Notes are in this browser\'s small storage (the browser database could not be opened): ' + (lsUsed() / 1e6).toFixed(2) + ' of 5.24 million characters (' + i.pct.toFixed(1) + '%).\n\nExport a backup regularly. If this persists after a reload, tell Claude.';
+  return 'Notes: ' + mb(i.notes) + ' (about ' + (i.notes / 1e6).toFixed(1) + ' million characters).\n' +
+    (i.est ? 'Everything Hinay keeps in this browser, pictures included: ' + mb(i.est.usage) + ' of the ' + mb(i.est.quota) + ' the browser allows (' + (i.pct < 1 ? 'under 1' : i.pct.toFixed(0)) + '%).\n' : '') +
+    (i.persisted === true ? 'The browser has agreed not to clear it to free space.' : i.persisted === false ? 'The browser may clear it if the disk gets very full (Drive keeps a copy; export a backup now and then).' : '') +
+    '\n\n' + (i.pct >= 70 ? 'The disk is getting full. Free space on this device, and export a backup.' : 'Nothing to do. This turns dark and pulses at 70%.');
+}
+let usageSeq = 0;
+async function showUsage() {
   const b = $('#usage'); if (!b) return;
-  const pct = Math.round(storageUsed() / LS_LIMIT * 100);
-  b.textContent = 'Storage ' + pct + '%'; b.classList.toggle('urgent', pct >= 70);
-  b.title = 'Notes storage used in this browser (pictures not included). Click for details.';
+  const seq = ++usageSeq, i = await storageInfo(); if (seq !== usageSeq) return;
+  if (fullWarned) return; // keeps showing Storage FULL
+  const pct = Math.round(i.pct);
+  b.textContent = 'Storage ' + (i.pct < 1 ? '<1' : pct) + '%'; b.classList.toggle('urgent', pct >= 70);
+  b.title = bigDB ? 'Share of the room the browser allows Hinay, pictures included. Click for details.' : 'Notes storage used in this browser (small storage). Click for details.';
 }
 function storageFull() {
   const b = $('#usage'); if (b) { b.textContent = 'Storage FULL'; b.classList.add('urgent'); }
-  if (!fullWarned) { fullWarned = true; alert('Hinay could not save: this browser\'s note storage is full.\n\nExport a backup now. Anything typed since the last save is only in this tab until this is fixed. Ask Claude to move notes to the larger storage.'); }
+  if (!fullWarned) { fullWarned = true; alert('Hinay could not save: this browser\'s storage is full.\n\nExport a backup now. Anything typed since the last save is only in this tab until this is fixed. Free some space on this device, then reload.'); }
 }
 
 /* ---------- undo / redo ---------- */
@@ -464,8 +559,8 @@ const CLIENT_ID = '893079433077-hnqv9138rg6ioje7r7qiicu5e0sf5it5.apps.googleuser
 const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 const META_KEY = 'eccopim.meta', SYNC_KEY = 'eccopim.sync', DEV_KEY = 'eccopim.device', CONF_KEY = 'eccopim.conflicts', TOKEN_KEY = 'eccopim.token';
 const COLL = { b: 'bullets', c: 'containers', f: 'folders' };
-function lsGet(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
-function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+function lsGet(k, d) { try { const v = BIG.includes(k) ? bigGet(k) : localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+function lsSet(k, v) { try { const s = JSON.stringify(v); if (BIG.includes(k)) bigSet(k, s); else localStorage.setItem(k, s); return true; } catch (e) { return false; } }
 let M = lsGet(META_KEY, null), SY = lsGet(SYNC_KEY, null), CONF = lsGet(CONF_KEY, []), DEV = lsGet(DEV_KEY, null);
 const FRESH = !M || !SY || !DEV || !LOADED;
 if (FRESH) {
@@ -2899,7 +2994,7 @@ try { if (localStorage.getItem('eccopim.navHidden')) document.body.classList.add
 narrowMQ.addEventListener && narrowMQ.addEventListener('change', () => { document.body.classList.remove('navOpen'); syncNavBtn(); });
 syncNavBtn();
 $('#reloadBtn').textContent = '↻ Refresh (' + (isMac ? '⌘R' : 'Ctrl+R') + ')';
-$('#reloadBtn').onclick = () => { try { persist(); stamp(); } catch (e) {} location.reload(); };
+$('#reloadBtn').onclick = async () => { await saveNow(); location.reload(); };
 $('#filter').addEventListener('input', renderSidebar);
 $('#toastUndo').onclick = () => { hideToast(); undo(); };
 
@@ -2913,7 +3008,7 @@ function exportData() {
   S.ui.lastExport = new Date().toISOString(); save(); showBackupDue();
 }
 $('#exportBtn').onclick = exportData;
-$('#usage').onclick = () => alert(usageText());
+$('#usage').onclick = async () => alert(await usageText());
 $('#importBtn').onclick = () => $('#importFile').click();
 $('#importFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return;
