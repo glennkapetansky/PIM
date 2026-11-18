@@ -2439,7 +2439,7 @@ content.addEventListener('keydown', e => {
         b.order = orderLast(above.id, cid); b.parentId = above.id; above.collapsed = false;
         commit(b.id, pos); return;
       }
-      toast(above ? 'The item above was written somewhere else (' + srcLabel(above) + '). Drag this item\'s dot onto it to nest it there; that moves it there.'
+      toast(above ? 'The item above was written somewhere else (' + srcLabel(above) + '). To nest it there, right-click this item → Move to that note, then nest it in the note.'
                   : 'To indent, open the note where it was written (click the grey line above it).', false);
       return;
     }
@@ -2675,7 +2675,7 @@ document.addEventListener('keydown', e => {
 });
 
 /* ---------- drag and drop ---------- */
-let drag = null, dropAt = null;
+let drag = null, dropAt = null, dropBlocked = null; // dropBlocked: the item from another note under the pointer (cross-note drops are refused)
 function clearDropMarks() { document.querySelectorAll('.drop,.drop-before,.drop-after,.drop-child').forEach(n => n.classList.remove('drop', 'drop-before', 'drop-after', 'drop-child')); }
 function isDesc(t, ancestorId) { let x = t; while (x) { if (x.id === ancestorId) return true; x = x.parentId ? S.bullets[x.parentId] : null; } return false; }
 function flashFolder(fid) { const it = document.querySelector('.item.folder[data-fid="' + fid + '"]'); if (it) it.classList.add('flash'); }
@@ -2697,7 +2697,12 @@ document.addEventListener('dragstart', e => {
     drag = { type: 'folder', id: fi.dataset.fid }; e.dataTransfer.setData('text/plain', folderName(fi.dataset.fid)); e.dataTransfer.effectAllowed = 'move';
   } else drag = null;
 });
-document.addEventListener('dragend', () => { drag = null; dropAt = null; clearDropMarks(); });
+document.addEventListener('dragover', () => { dropBlocked = null; }, true); // reset each move; the notes' handler sets it again over a refused row
+document.addEventListener('dragend', () => {
+  const t = dropBlocked && S.bullets[dropBlocked]; dropBlocked = null;
+  if (t) toast('Not moved: that item was written in ' + srcLabel(t) + '. A drag can only nest items written in the same note. To move it there, right-click → Move to, or open that note.', false);
+  drag = null; dropAt = null; clearDropMarks();
+});
 const dragsNotes = () => drag && drag.type === 'bullet' && !drag.ids.some(id => S.bullets[id] && S.bullets[id].isSession); // sessions only link to people/projects
 function canDropOnFolder(fid) {
   if (!drag) return false;
@@ -2748,6 +2753,7 @@ content.addEventListener('dragover', e => {
   const row = e.target.closest('.outline .row'); if (!row) return;
   const t = bulletOf(row);
   if (!t || drag.ids.some(id => !S.bullets[id] || S.bullets[id].isSession || isDesc(t, id))) return; // sessions only link
+  if (drag.ids.some(id => S.bullets[id].containerId !== t.containerId)) { dropBlocked = t.id; return; } // never move an item into another note by a drop (Nov 18: a picture left its file silently)
   const zone = dropZone(row, t, e);
   row.classList.add('drop-' + zone); dropAt = { t: t.id, zone }; e.dataTransfer.dropEffect = 'move';
 });
