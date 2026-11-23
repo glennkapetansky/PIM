@@ -181,6 +181,7 @@ input[type="checkbox"]{accent-color:var(--accent)}
 .tag .x{margin-left:5px;opacity:.55}
 .tag .x:hover{opacity:1}
 .tw[draggable="true"]{cursor:grab}
+@media (hover: none){.tx{min-height:22px}.tw{position:relative}.tw::after{content:'';position:absolute;left:-8px;right:-6px;top:-4px;bottom:-4px}}
 .row.drop-before{box-shadow:inset 0 2px 0 var(--accent)}
 .row.drop-after{box-shadow:inset 0 -2px 0 var(--accent)}
 .row.drop-child{background:var(--accent-bg);box-shadow:inset 3px 0 0 var(--accent)}
@@ -415,6 +416,9 @@ const linkify = t => esc(t || '').replace(/(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])
 const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
 const $ = s => document.querySelector(s);
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+// Phones/tablets (no hover): a bullet's text is editable only while it is being edited, so the phone's own
+// selection handles can run across several bullets (Copy); Hinay's menu is a long-press on the dot.
+const TOUCH = window.matchMedia('(hover: none)').matches;
 const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
 const MOD = isMac ? 'Cmd' : 'Ctrl', UNDO_HINT = '\n(' + MOD + '+Z undoes this.)'; // shortcut names as this computer writes them
 function hash(str) { // cyrb53: short fingerprint of a record, to notice what changed
@@ -1457,6 +1461,7 @@ function nodeEl(b, idx, flat) { // flat: one row per item (each item shows once)
   if (!b.isSession) { tw.draggable = true; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag: onto a person or project to link, onto a meeting or file to move, or within the notes to reorder'; }
   else { tw.draggable = true; tw.textContent = tw.textContent || '•'; tw.title = (tw.title ? tw.title + ' · ' : '') + 'Drag onto a person or project to link this whole session'; }
   if (kids.length && !flat) { const dg = el('span', 'dg'); dg.textContent = '⠿'; dg.draggable = true; dg.title = b.isSession ? 'Drag onto a person or project to link this whole session' : 'Drag: onto a person or project to link, onto a meeting or file to move, or within the notes to reorder'; row.appendChild(dg); }
+  if (TOUCH) tw.draggable = false;
   row.appendChild(tw);
   if (b.isSession) {
     const d = el('span', 'sdate'); d.textContent = fmtLong(b.date); d.title = 'Click to change the date or delete this session'; row.appendChild(d);
@@ -1464,7 +1469,8 @@ function nodeEl(b, idx, flat) { // flat: one row per item (each item shows once)
     const ck = el('input', 'ck' + (hasTask(b) ? ' show' : '')); ck.type = 'checkbox'; ck.checked = !!b.done; ck.tabIndex = -1;
     ck.title = 'Done (' + MOD + '+Enter)'; row.appendChild(ck);
   }
-  const tx = el('div', 'tx'); tx.contentEditable = 'true'; tx.spellcheck = true;
+  const tx = el('div', 'tx'); tx.contentEditable = TOUCH ? 'false' : 'true'; tx.spellcheck = true;
+  if (TOUCH) tx.focus = function (o) { this.contentEditable = 'true'; return HTMLElement.prototype.focus.call(this, o); };
   tx.dataset.ph = b.isSession ? 'Session topic (optional)' : '';
   tx.innerHTML = linkify(b.text);
   row.appendChild(tx);
@@ -2179,9 +2185,31 @@ function blockHTML(lines) {
   return '<meta charset="utf-8">' + h;
 }
 function blockPlain(lines) { return lines.map(({ b, lv }) => '\t'.repeat(lv) + '- ' + lineText(b)).join('\n') + '\n'; }
+// Bullets whose text a native selection overlaps (the phone's handles dragged across bullets), in screen order.
+function selectionBullets() {
+  const s = getSelection(); if (!s || !s.rangeCount || s.isCollapsed) return [];
+  const r = s.getRangeAt(0), ids = [];
+  for (const n of content.querySelectorAll('.node')) {
+    const row = n.firstElementChild; if (!row || row.classList.contains('session')) continue;
+    const tx = row.querySelector('.tx'); if (!tx) continue;
+    const tr = document.createRange(); tr.selectNodeContents(tx);
+    if (r.compareBoundaryPoints(Range.START_TO_END, tr) > 0 && r.compareBoundaryPoints(Range.END_TO_START, tr) < 0 && S.bullets[n.dataset.id]) ids.push(n.dataset.id);
+  }
+  return ids;
+}
 function onCopyCut(e) {
   const mode = copyMode || e.type; copyMode = null;
-  if (!bsel.size) return;
+  if (!bsel.size) { // a selection across two or more bullets: copy those bullets with their indents (never deletes)
+    const ids = selectionBullets(); if (ids.length < 2) return;
+    const set = new Set(ids);
+    const lines = ids.map(id => { const b = S.bullets[id]; let n = 0, p = b.parentId ? S.bullets[b.parentId] : null; while (p) { if (set.has(p.id)) n++; p = p.parentId ? S.bullets[p.parentId] : null; } return { b, lv: n }; });
+    for (let i = 0; i < lines.length; i++) lines[i].lv = Math.min(lines[i].lv, i ? lines[i - 1].lv + 1 : 0);
+    e.preventDefault();
+    e.clipboardData.setData('text/html', blockHTML(lines));
+    e.clipboardData.setData('text/plain', blockPlain(lines));
+    toast('Copied ' + plural(lines.length, 'bullet') + ' with their indents', false);
+    return;
+  }
   const a = document.activeElement; if (a && a.matches && a.matches('input, select, textarea, .tx')) return;
   const roots = selRoots(); if (!roots.length) return;
   const lines = blockLines(roots);
@@ -2642,6 +2670,24 @@ content.addEventListener('keydown', e => {
 /* ---------- popovers ---------- */
 const pop = $('#pop');
 let popFor = null;
+if (TOUCH) {
+  // Tap a bullet's text to edit it, with the caret where the finger was.
+  content.addEventListener('click', e => {
+    let tx = e.target.closest && e.target.closest('.tx');
+    if (!tx) { // a tap on the row beside the text (not the dot, checkbox, tags or date) edits it too
+      const row = e.target.closest && e.target.closest('.outline .row');
+      if (!row || e.target.closest('.tw, .dg, .ck, .meta, .tag, .sdate, .att')) return;
+      tx = row.querySelector('.tx'); if (!tx || tx.isContentEditable) return;
+      tx.focus(); setCaret(tx, 'end'); return;
+    }
+    if (tx.isContentEditable || e.target.closest('a')) return;
+    const s = getSelection(); if (s && !s.isCollapsed && tx.contains(s.anchorNode)) return; // a selection is being made
+    const r = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null;
+    tx.focus();
+    if (r && tx.contains(r.startContainer)) { s.removeAllRanges(); s.addRange(r); } else setCaret(tx, 'end');
+  });
+  content.addEventListener('focusout', e => { const t = e.target; if (t.classList && t.classList.contains('tx')) t.contentEditable = 'false'; });
+}
 let lastTouch = 0, popTouch = false, touchEditing = false;
 document.addEventListener('pointerdown', e => {
   if (e.pointerType !== 'touch') return;
@@ -2738,6 +2784,7 @@ content.addEventListener('contextmenu', e => {
   // Phone: long-press inside the bullet you're editing = the phone's own menu (Paste, Select all);
   // long-press on any other bullet = Hinay's menu.
   if (touchEditing && Date.now() - lastTouch < 2000 && e.target.closest('.tx') === document.activeElement) return;
+  if (TOUCH && e.target.closest('.tx')) return; // phone: long-press on text = the phone's selection (Copy); the dot gives Hinay's menu
   const tg = e.target.closest('.tag');
   if (tg) {
     e.preventDefault();
