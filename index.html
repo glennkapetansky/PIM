@@ -908,9 +908,28 @@ function showSync() {
 }
 
 /* ---------- model helpers ---------- */
+/* Stage 12: lookups by parent / note / session used to scan every bullet on each call, and a redraw makes
+   thousands of calls (startup took ~2 s at 11,000 bullets, ~44 s at 44,000). Now each read-only pass (a redraw,
+   the startup cleanup) builds one index (withIdx) and drops it when done; nothing keeps it between passes, so it
+   can't go stale across edits. Anything that changes structure (newBullet, placeAt, setContainerDeep) switches it
+   off for the rest of the pass, and every result is checked against the live record, so a deleted or moved item
+   never comes back from the index. Outside a pass the lookups scan as before. */
+let IDX = null;
+function buildIdx() {
+  const kids = new Map(), byC = new Map(), sess = new Map();
+  const add = (m, k, b) => { const a = m.get(k); if (a) a.push(b); else m.set(k, [b]); };
+  for (const b of Object.values(S.bullets)) {
+    if (b.parentId) add(kids, b.parentId, b);
+    add(byC, b.containerId, b);
+    if (b.isSession) add(sess, b.containerId, b);
+  }
+  return { kids, byC, sess };
+}
+function withIdx(fn) { if (IDX) return fn(); IDX = buildIdx(); try { return fn(); } finally { IDX = null; } }
+const isLive = b => S.bullets[b.id] === b;
 function kidsIndex(cid) {
   const m = new Map();
-  for (const b of Object.values(S.bullets)) {
+  for (const b of IDX ? (IDX.byC.get(cid) || []).filter(isLive) : Object.values(S.bullets)) {
     if (b.containerId !== cid) continue;
     const k = b.parentId || '_';
     if (!m.has(k)) m.set(k, []);
@@ -926,13 +945,13 @@ function orderFirst(pid, cid) { const k = childList(pid, cid); return k.length ?
 function orderLast(pid, cid) { const k = childList(pid, cid); return k.length ? k[k.length - 1].order + 1 : 0; }
 function newBullet(cid, pid, order, extra) {
   const b = Object.assign({ id: uid(), containerId: cid, parentId: pid || null, order, text: '', isSession: false, date: null, start: null, end: null, done: false, doneAt: null, links: [], collapsed: false, created: new Date().toISOString() }, extra || {});
-  S.bullets[b.id] = b; return b;
+  S.bullets[b.id] = b; IDX = null; return b;
 }
-const kidsOf = id => Object.values(S.bullets).filter(x => x.parentId === id); // any order; childList gives sibling order
+const kidsOf = id => (IDX ? (IDX.kids.get(id) || []).filter(isLive) : Object.values(S.bullets)).filter(x => x.parentId === id); // any order; childList gives sibling order
 function deleteTree(id) { for (const k of kidsOf(id)) deleteTree(k.id); delete S.bullets[id]; }
 function countTree(id) { return 1 + kidsOf(id).reduce((a, k) => a + countTree(k.id), 0); }
 function treeEmpty(id) { const b = S.bullets[id]; if ((b.text || '').trim() || b.file) return false; return kidsOf(id).every(k => treeEmpty(k.id)); }
-function sessionsOf(cid) { return Object.values(S.bullets).filter(b => b.containerId === cid && b.isSession); }
+function sessionsOf(cid) { return (IDX ? (IDX.sess.get(cid) || []).filter(isLive) : Object.values(S.bullets)).filter(b => b.containerId === cid && b.isSession); }
 // a bullet is task-like when it is checked, has dates, or has a link that isn't a note link
 function hasTask(b) { return !!(b.done || b.start || b.end || (b.links || []).some(l => !l.note)); }
 function effDate(b) {
@@ -954,9 +973,10 @@ function topOnly(list) {
   return list.filter(r => { let p = r.b.parentId ? S.bullets[r.b.parentId] : null; while (p) { if (ids.has(p.id)) return false; p = p.parentId ? S.bullets[p.parentId] : null; } return true; });
 }
 const liveItems = () => Object.values(S.bullets).filter(b => !b.isSession && S.containers[b.containerId] && (b.text || '').trim());
-function setContainerDeep(b, cid) { b.containerId = cid; for (const k of kidsOf(b.id)) setContainerDeep(k, cid); }
+function setContainerDeep(b, cid) { IDX = null; b.containerId = cid; for (const k of kidsOf(b.id)) setContainerDeep(k, cid); }
 // Put bullets ids (in order) under parentId at sibling index k (counted without the moved ones).
 function placeAt(ids, parentId, cid, k) {
+  IDX = null;
   const moving = new Set(ids);
   const sib = childList(parentId, cid).filter(x => !moving.has(x.id)), n = ids.length;
   const lo = sib[k - 1] ? sib[k - 1].order : (sib[k] ? sib[k].order - n - 1 : 0);
@@ -1306,7 +1326,8 @@ function commit(focusId, pos) { save(); renderSidebar(); renderMain(); refocus({
 function renderAll() { renderSidebar(); showBackupDue(); renderMain(); }
 
 const TODO_LABEL = 'Glenn To-Do'; // the Today view and the Me folder, combined (Nov 8)
-function renderSidebar() {
+function renderSidebar() { withIdx(renderSidebarPass); }
+function renderSidebarPass() {
   const q = $('#filter').value.trim().toLowerCase();
   const lists = $('#lists'); lists.innerHTML = '';
   const note = text => { const e = el('div', 'empty-note'); e.textContent = text; lists.appendChild(e); };
@@ -1460,7 +1481,8 @@ function openItems(c) {
     .sort((a, b) => (effDate(b) || '').localeCompare(effDate(a) || ''));
 }
 
-function renderMain() {
+function renderMain() { withIdx(renderMainPass); }
+function renderMainPass() {
   const ct = $('#content');
   const a = document.activeElement, sq = a && a.id === 'srchQ' ? [a.selectionStart, a.selectionEnd] : null; // keep typing in Search across redraws
   ct.innerHTML = ''; clearHighlight();
@@ -2129,6 +2151,50 @@ function deleteItems(ids) {
   bsel.clear(); selAnchor = selFocus = null;
   save(); renderAll(); toast('Deleted ' + plural(n, 'bullet'));
 }
+/* Copy / cut a swept block to other apps (email, Teams). Each selected bullet goes with all its
+   sub-bullets (the same set Delete would remove), indented relative to the outermost one.
+   text/html = nested lists (Outlook, Teams, Word keep the indents); text/plain = tabs + "- ". */
+let copyMode = null; // set by the block menu, which reaches the copy event through execCommand
+function blockLines(roots) { // indent = how many of the bullet's own parents are also being copied
+  const out = [], inSet = new Set();
+  const walk = b => { out.push({ b }); inSet.add(b.id); for (const k of kidsOf(b.id)) walk(k); };
+  for (const id of roots) walk(S.bullets[id]);
+  for (const o of out) { let n = 0, p = o.b.parentId ? S.bullets[o.b.parentId] : null; while (p) { if (inSet.has(p.id)) n++; p = p.parentId ? S.bullets[p.parentId] : null; } o.lv = n; }
+  return out;
+}
+function lineText(b) {
+  const t = (b.text || '').trim();
+  if (b.file) return t && t !== b.file.name.replace(/\.[^.]+$/, '') ? t + ' [' + b.file.name + ']' : '[' + b.file.name + ']';
+  return t;
+}
+function blockHTML(lines) {
+  let h = '', lv = -1;
+  for (const { b, lv: n } of lines) {
+    if (n > lv) h += '<ul>'.repeat(n - lv);
+    else { h += '</li>'; if (n < lv) h += '</ul></li>'.repeat(lv - n); }
+    h += '<li>' + (linkify(lineText(b)) || '&nbsp;');
+    lv = n;
+  }
+  if (lv >= 0) h += '</li>' + '</ul></li>'.repeat(lv) + '</ul>';
+  return '<meta charset="utf-8">' + h;
+}
+function blockPlain(lines) { return lines.map(({ b, lv }) => '\t'.repeat(lv) + '- ' + lineText(b)).join('\n') + '\n'; }
+function onCopyCut(e) {
+  const mode = copyMode || e.type; copyMode = null;
+  if (!bsel.size) return;
+  const a = document.activeElement; if (a && a.matches && a.matches('input, select, textarea, .tx')) return;
+  const roots = selRoots(); if (!roots.length) return;
+  const lines = blockLines(roots);
+  e.preventDefault();
+  e.clipboardData.setData('text/html', blockHTML(lines));
+  e.clipboardData.setData('text/plain', blockPlain(lines));
+  if (mode === 'cut') {
+    deleteItems(roots);
+    toast('Cut ' + plural(lines.length, 'bullet') + ': paste them into email or Teams. Pasted back into Hinay they come in as new bullets, without links or dates.');
+  } else toast('Copied ' + plural(lines.length, 'bullet') + ' with their indents', false);
+}
+document.addEventListener('copy', onCopyCut);
+document.addEventListener('cut', onCopyCut);
 function moveToContainer(ids, cid) {
   const c = S.containers[cid]; ids = ids.filter(id => S.bullets[id] && !S.bullets[id].isSession);
   if (!c || !ids.length) return;
@@ -2652,11 +2718,14 @@ function blockPop(x, y) {
   const total = roots.reduce((a, id) => a + countTree(id), 0);
   const cids = new Set(roots.map(id => S.bullets[id].containerId));
   pop.innerHTML = '<div style="font-weight:600;margin-bottom:4px">' + plural(n, 'bullet') + ' selected</div><div class="menu">' +
+    '<button id="bCopy">Copy (' + MOD + '+C)</button><button id="bCut">Cut (' + MOD + '+X)</button>' +
     '<button id="bDone">Check off all</button><button id="bUndone">Uncheck all</button><button id="bNote">Make their links notes (not tasks)</button></div>' +
     '<label>Link to <select id="bLink"><option value="">choose…</option>' + folderOptions(new Set()) + '</select></label>' +
     '<label>Move to <select id="bMove"><option value="">choose…</option>' + moveOptions(cids.size === 1 ? [...cids][0] : null) + '</select></label>' +
     '<div class="btns"><button id="bDel" class="danger">Delete ' + plural(total, 'bullet') + '</button></div>';
   placePop(x, y);
+  $('#bCopy').onclick = () => { closePop(); copyMode = 'copy'; document.execCommand('copy'); };
+  $('#bCut').onclick = () => { closePop(); copyMode = 'cut'; document.execCommand('copy'); };
   $('#bDone').onclick = () => { closePop(); setDoneItems([...bsel], true); };
   $('#bUndone').onclick = () => { closePop(); setDoneItems([...bsel], false); };
   $('#bNote').onclick = () => { closePop(); notesItems([...bsel]); };
@@ -3027,12 +3096,12 @@ $('#importFile').onchange = e => {
 };
 
 /* ---------- start ---------- */
-(function startupCleanup() {
+withIdx(function startupCleanup() {
   for (const c of Object.values(S.containers)) {
     if (c.type !== 'meeting') continue;
     for (const s of sessionsOf(c.id)) if (!(c.id === S.ui.current && s.date === todayISO()) && treeEmpty(s.id)) deleteTree(s.id);
   }
-})();
+});
 (function keepRankedOnTodo() { // Nov 8: Glenn To-Do became "only what I put there". Anything already in My order stays: it gets a Me link.
   let n = 0;
   for (const b of Object.values(S.bullets)) if (b.rank != null && !b.done && !(b.links || []).some(l => l.folder === 'me' && !l.note)) {
